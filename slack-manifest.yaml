@@ -1,0 +1,33 @@
+display_information:
+  name: DMS/SFA Bot
+  description: Slack-first DMS/SFA for Salesforce-backed distributor operations
+  background_color: "#1e3a5f"
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+  bot_user:
+    display_name: DMSFA
+    always_online: true
+  slash_commands:
+    - command: /wd-dms
+      description: Open DMS/SFA dashboard
+      should_escape: false
+  shortcuts: []
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - users:read
+      - users:read.email
+      - im:write
+      - files:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+  org_deploy_enabled: false

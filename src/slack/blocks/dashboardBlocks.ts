@@ -1,0 +1,91 @@
+import {
+  buildSection,
+  buildDivider,
+  buildHeader,
+  buildButton,
+  buildContext,
+} from './commonBlocks';
+import { SLACK_ACTION_IDS } from '../../config/slackConstants';
+import { DashboardMetrics, BusinessInsight } from '../../services/InsightsService';
+
+export function buildDashboardView(
+  userName: string,
+  metrics: DashboardMetrics,
+  insights: BusinessInsight[],
+) {
+  const blocks = [
+    buildHeader(`:chart_with_upwards_trend: ${userName}'s Dashboard`),
+    buildDivider(),
+    buildSection(
+      `*Monthly Performance*\n` +
+        `:package: Orders This Month: *${metrics.ordersThisMonth}* (Rs ${formatCurrency(metrics.ordersThisMonthValue)})\n` +
+        `:moneybag: Total Order Value: *Rs ${formatCurrency(metrics.totalOrderValue)}*\n` +
+        `:chart_with_upwards_trend: Monthly Growth: *${metrics.monthlyGrowthPercent > 0 ? '+' : ''}${metrics.monthlyGrowthPercent}%*`,
+    ),
+    buildDivider(),
+    buildSection(
+      `*Order Type Split*\n` +
+        `:pencil: Primary: *${metrics.primaryOrders}* orders | Rs ${formatCurrency(metrics.primaryOrderValue)} | Pending: *${metrics.primaryPendingOrders}*\n` +
+        `:twisted_rightwards_arrows: Secondary: *${metrics.secondaryOrders}* orders | Rs ${formatCurrency(metrics.secondaryOrderValue)} | Pending: *${metrics.secondaryPendingOrders}*`,
+    ),
+    buildDivider(),
+    buildSection(
+      `*At a Glance*\n` +
+        `:hourglass_flowing_sand: Pending Orders: *${metrics.pendingOrders}*\n` +
+        `:leftwards_arrow_with_hook: Pending Returns: *${metrics.pendingReturns}*\n` +
+        `:memo: Open Claims: *${metrics.openClaims}*\n` +
+        `:receipt: Unpaid Invoices: *${metrics.unpaidInvoices}*\n` +
+        `:warning: Inventory Alerts: *${metrics.inventoryAlerts}*`,
+    ),
+    buildDivider(),
+    buildSection('*:bulb: Business Insights*'),
+    ...insights.slice(0, 3).map((insight) =>
+      buildSection(`${insightIcon(insight.type)} *${insight.title}*\n${insight.description}`),
+    ),
+    buildDivider(),
+    buildSection('*Quick Actions*'),
+    {
+      type: 'actions' as const,
+      elements: [
+        buildButton(':pencil: Create Primary Order', SLACK_ACTION_IDS.SELECT_ORDER_TYPE, 'create_primary', 'primary'),
+        buildButton(':clipboard: My Primary Orders', SLACK_ACTION_IDS.VIEW_ORDER_DETAIL, 'my_orders'),
+      ],
+    },
+    {
+      type: 'actions' as const,
+      elements: [
+        buildButton(':twisted_rightwards_arrows: Secondary Orders', 'secondary_orders_menu', 'secondary'),
+        buildButton(':leftwards_arrow_with_hook: Returns & Claims', 'returns_claims_menu', 'returns'),
+      ],
+    },
+    {
+      type: 'actions' as const,
+      elements: [
+        buildButton(':bar_chart: Business Insights', 'insights_menu', 'insights'),
+        buildButton(':gear: ARS Settings', 'ars_menu', 'ars'),
+        buildButton(':arrows_counterclockwise: Refresh', 'refresh_insights', 'refresh'),
+      ],
+    },
+    buildDivider(),
+    buildContext([`Updated: ${new Date().toLocaleString()}`]),
+  ];
+
+  return { blocks };
+}
+
+function formatCurrency(amount: number): string {
+  return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function insightIcon(type: string): string {
+  switch (type) {
+    case 'warning':
+      return ':warning:';
+    case 'success':
+      return ':white_check_mark:';
+    case 'recommendation':
+      return ':star:';
+    default:
+      return ':information_source:';
+  }
+}
