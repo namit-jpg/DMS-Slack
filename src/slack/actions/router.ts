@@ -535,8 +535,9 @@ export function registerAllActions(
 
   app.action('ars_menu', async ({ ack, body, respond }) => {
     await ack();
+    const userId = body.user.id;
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const { context: ctx } = await pipeline.resolve(userId);
 
       let config: ArsConfig | null = null;
       let triggeredOrders: ArsTriggeredOrder[] = [];
@@ -553,10 +554,40 @@ export function registerAllActions(
         lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
 
-      await safeRespond(body, respond, {
-        text: 'ARS Dashboard',
-        blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches),
-        replace_original: false,
+      // input blocks are only valid in home tab views, not in message responses (respond/response_url).
+      // Publish directly to the home tab so Slack accepts the block structure.
+      await app.client.views.publish({
+        user_id: userId,
+        view: { type: 'home', blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches) },
+      });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  // Handles toggle_ars_true and toggle_ars_false generated dynamically in buildARSDashboard
+  app.action(/^toggle_ars_/, async ({ ack, body, respond }) => {
+    await ack();
+    const userId = body.user.id;
+    try {
+      const { context: ctx } = await pipeline.resolve(userId);
+      const actionId = (body as any).actions?.[0]?.action_id as string;
+      const activate = actionId === 'toggle_ars_true';
+      await sfClient.updateARSStatus(ctx, activate);
+
+      let config: ArsConfig | null = null;
+      let triggeredOrders: ArsTriggeredOrder[] = [];
+      let batches: BatchStockPolicy[] = [];
+      try { config = await sfClient.getARSConfig(ctx); } catch { /* BLK-008 */ }
+      try { triggeredOrders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* BLK-008 */ }
+      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
+
+      const resolvedConfig: ArsConfig = config || {
+        autoReplenishmentEnabled: activate,
+        activeProducts: { productId: '', productName: 'N/A', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
+      };
+      await app.client.views.publish({
+        user_id: userId,
+        view: { type: 'home', blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches) },
       });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
