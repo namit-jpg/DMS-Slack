@@ -1,7 +1,7 @@
 import { App } from '@slack/bolt';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { IdentityPipeline } from '../../identity/IdentityPipeline';
-import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrderQuote, GRNPayload, InvoicePayload } from '../../salesforce/types';
+import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrderQuote, GRNPayload, InvoicePayload, ArsConfig, ArsTriggeredOrder, BatchStockPolicy } from '../../salesforce/types';
 import { getClientMode } from '../../salesforce/SalesforceClient';
 import { BLOCKERS } from '../../salesforce/blockers';
 import { InsightsService } from '../../services/InsightsService';
@@ -537,10 +537,27 @@ export function registerAllActions(
     await ack();
     try {
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const config = await sfClient.getARSConfig(ctx);
-      const triggeredOrders = await sfClient.getARSTriggeredOrders(ctx);
-      const batches = await sfClient.getBatchWiseStockPolicies(ctx);
-      await safeRespond(body, respond, { text: 'ARS Dashboard', blocks: buildARSDashboard(config, triggeredOrders, batches), replace_original: false });
+
+      let config: ArsConfig | null = null;
+      let triggeredOrders: ArsTriggeredOrder[] = [];
+      let batches: BatchStockPolicy[] = [];
+
+      try { config = await sfClient.getARSConfig(ctx); } catch { /* BLK-008 */ }
+      try { triggeredOrders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* BLK-008 */ }
+      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail in some orgs */ }
+
+      const resolvedConfig: ArsConfig = config || {
+        autoReplenishmentEnabled: false,
+        activeProducts: { productId: '', productName: 'Not Available (BLK-008)', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A',
+        lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
+      };
+
+      await safeRespond(body, respond, {
+        text: 'ARS Dashboard',
+        blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches),
+        replace_original: false,
+      });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
