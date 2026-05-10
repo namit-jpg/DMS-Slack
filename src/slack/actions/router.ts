@@ -601,9 +601,12 @@ export function registerAllActions(
       const stateValues = (body as any).state?.values || {};
 
       const changes: Array<{ productId: string; productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }> = [];
-      for (const b of batches) {
-        const newMinVal = stateValues[`ars_min_${b.productId}`]?.[`ars_input_min_${b.productId}`]?.value;
-        const newMaxVal = stateValues[`ars_max_${b.productId}`]?.[`ars_input_max_${b.productId}`]?.value;
+      const editableCount = Math.min(5, batches.length);
+      for (let i = 0; i < editableCount; i++) {
+        const b = batches[i];
+        const blockKey = `${b.productId}_${i}`;
+        const newMinVal = stateValues[`ars_min_${blockKey}`]?.[`ars_input_min_${blockKey}`]?.value;
+        const newMaxVal = stateValues[`ars_max_${blockKey}`]?.[`ars_input_max_${blockKey}`]?.value;
         const newMin = parseInt(newMinVal || String(b.minStock), 10) || b.minStock;
         const newMax = parseInt(newMaxVal || String(b.maxStock), 10) || b.maxStock;
         if (newMin !== b.minStock || newMax !== b.maxStock) {

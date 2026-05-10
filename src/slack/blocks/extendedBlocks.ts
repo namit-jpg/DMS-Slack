@@ -84,30 +84,44 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
     buildHeader(':gear: ARS Dashboard'),
     buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Frequency:* ${config.replenishmentFrequency}\n*Thresholds:* Min ${config.minThreshold} / Max ${config.maxThreshold}\n*Last Modified:* ${config.lastModifiedBy} (${config.lastModifiedDate})`),
     buildDivider(),
-    buildSection(`*Active Product:* ${config.activeProducts.productName}\nCurrent: ${config.activeProducts.currentStock} | Min: ${config.activeProducts.minThreshold} | Max: ${config.activeProducts.maxThreshold}\nReorder Point: ${config.activeProducts.reorderPoint} | Reorder Qty: ${config.activeProducts.reorderQuantity}`),
-    buildDivider(),
   ];
   const toggleLabel = config.autoReplenishmentEnabled ? ':no_entry: Deactivate ARS' : ':white_check_mark: Activate ARS';
   blocks.push({ type: 'actions', elements: [buildButton(toggleLabel, `toggle_ars_${!config.autoReplenishmentEnabled}`, String(!config.autoReplenishmentEnabled), config.autoReplenishmentEnabled ? 'danger' : 'primary')] });
 
   if (batches.length > 0) {
     blocks.push(buildDivider());
-    blocks.push(buildSection('*Batch-wise Stock (Edit Quantities)*'));
-    batches.forEach((b) => {
+    const editableCount = Math.min(5, batches.length);
+    blocks.push(buildSection(`*Batch-wise Stock (${batches.length} batches, editing first ${editableCount})*`));
+    for (let i = 0; i < editableCount; i++) {
+      const b = batches[i];
       const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
-      blocks.push(buildSection(`${emoji} *${b.batchNumber}* \u2014 ${b.productName}\nStock: ${b.availableStock}`));
-      blocks.push({ type: 'input', block_id: `ars_min_${b.productId}`, label: { type: 'plain_text', text: `Min Stock for ${b.productName}`.slice(0, 150) }, element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}`, initial_value: String(b.minStock) } });
-      blocks.push({ type: 'input', block_id: `ars_max_${b.productId}`, label: { type: 'plain_text', text: `Max Stock for ${b.productName}`.slice(0, 150) }, element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}`, initial_value: String(b.maxStock) } });
-    });
+      blocks.push(buildSection(`${emoji} *${b.batchNumber}* — ${b.productName} | Stock: ${b.availableStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
+      blocks.push({
+        type: 'input', block_id: `ars_min_${b.productId}_${i}`,
+        label: { type: 'plain_text', text: `Min for ${b.productName}`.slice(0, 150) },
+        element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}_${i}`, initial_value: String(b.minStock) },
+      });
+      blocks.push({
+        type: 'input', block_id: `ars_max_${b.productId}_${i}`,
+        label: { type: 'plain_text', text: `Max for ${b.productName}`.slice(0, 150) },
+        element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}_${i}`, initial_value: String(b.maxStock) },
+      });
+    }
+    if (batches.length > editableCount) {
+      blocks.push(buildSection(`:information_source: Showing ${editableCount} of ${batches.length} batches. Contact admin to edit more.`));
+    }
     blocks.push(buildDivider());
     blocks.push({ type: 'actions', elements: [buildButton(':envelope: Submit ARS Changes for Approval', 'ars_submit_for_approval', 'ars_changes', 'primary')] });
   }
 
   if (triggeredOrders.length > 0) {
     blocks.push(buildDivider());
-    blocks.push(buildSection('*Triggered Replenishment Orders:*'));
-    triggeredOrders.forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* \u2014 ${o.productName}\nQty: ${o.quantity} | Reason: ${o.reason}\nStock: ${o.currentStock} (Min: ${o.minThreshold}) | Status: ${o.status}`)));
+    blocks.push(buildSection(`*Triggered Replenishment Orders (${triggeredOrders.length}):*`));
+    triggeredOrders.slice(0, 3).forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* — ${o.productName} | Qty: ${o.quantity} | ${o.reason}\nStock: ${o.currentStock} (Min: ${o.minThreshold}) | Status: ${o.status}`)));
   }
+
+  blocks.push(buildDivider());
+  blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }
 
