@@ -27,6 +27,7 @@ import {
   DMSInvoice,
   DispatchRequest,
   SecondaryOrderGRN,
+  FulfillmentResult,
   ArsConfig,
   ArsTriggeredOrder,
   BatchStockPolicy,
@@ -42,11 +43,12 @@ const logger = createChildLogger('SalesforceRestClient');
 
 export class SalesforceRestClient implements ISalesforceClient {
   private auth: SalesforceAuth;
-  private apiVersion = 'v62.0';
+  private apiVersion: string;
   private cliToken: { accessToken: string; instanceUrl: string } | null = null;
 
   constructor(auth: SalesforceAuth) {
     this.auth = auth;
+    this.apiVersion = normalizeApiVersion(process.env.SALESFORCE_API_VERSION || '62.0');
   }
 
   setCliToken(token: { accessToken: string; instanceUrl: string }): void {
@@ -147,8 +149,17 @@ export class SalesforceRestClient implements ISalesforceClient {
     if (!response.ok) {
       const body = await response.text();
       log.error({ status: response.status, body }, 'Salesforce create failed');
-      throw new SalesforceError(`Create ${objectName} failed: ${response.statusText}`, {
-        userMessage: `Unable to create the ${objectName} record.`,
+      let userMessage = `Unable to create the ${objectName} record.`;
+      let errorCode = '';
+      try {
+        const parsed = JSON.parse(body) as Array<{ message: string; errorCode: string }>;
+        if (Array.isArray(parsed) && parsed[0]?.message) {
+          userMessage = parsed.map((e) => e.message).join('; ');
+          errorCode = parsed[0]?.errorCode || '';
+        }
+      } catch { /* body was not JSON */ }
+      throw new SalesforceError(`Create ${objectName} failed [${errorCode || response.status}]: ${userMessage}`, {
+        userMessage,
       });
     }
 
@@ -278,6 +289,30 @@ export class SalesforceRestClient implements ISalesforceClient {
     }
 
     return (await response.json()) as T;
+  }
+
+  private async createOrderWithFallback(
+    recordData: Record<string, unknown>,
+    log: ReturnType<typeof createChildLogger>,
+    correlationId?: string,
+  ): Promise<string> {
+    try {
+      return await this.create('Order', recordData, correlationId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isFieldError = msg.includes('INVALID_FIELD') || msg.includes('No such column') || msg.includes('INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST');
+      if (!isFieldError) throw err;
+      log.warn({ rejectedFields: Object.keys(recordData).filter((k) => k.endsWith('__c')) }, 'Order create rejected custom fields — retrying with standard fields only');
+      const standardData: Record<string, unknown> = {
+        AccountId: recordData.AccountId,
+        Pricebook2Id: recordData.Pricebook2Id,
+        Type: recordData.Type,
+        EffectiveDate: recordData.EffectiveDate,
+        Status: recordData.Status,
+        Description: recordData.Description,
+      };
+      return await this.create('Order', standardData, correlationId);
+    }
   }
 
   private async getPreferredPricebook(correlationId?: string): Promise<{ id: string; name: string }> {
@@ -515,7 +550,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         Grand_Total__c: quote.grandTotal,
         Discount_Amount__c: quote.schemeDiscount + quote.discountAmount,
         HasAppliedScheme__c: quote.schemeDiscount > 0,
-        Scheme_Code__c: quote.appliedSchemes.join(', ').slice(0, 255),
+        Scheme_Code__c: quote.appliedSchemes.join(', ').slice(0, 15),
         Credit_Applied__c: quote.creditApplied || 0,
         Tax_Amount__c: quote.taxAmount,
         Approval_Status__c: 'None',
@@ -524,7 +559,7 @@ export class SalesforceRestClient implements ISalesforceClient {
           .join('\n'),
         Description: `Created from Slack DMSFA for ${context.accountName} (${context.slackEmail})`,
       };
-      orderId = await this.create('Order', recordData, correlationId);
+      orderId = await this.createOrderWithFallback(recordData, log, correlationId);
       for (const line of quote.lineItems) {
         if (!line.pricebookEntryId) {
           throw new SalesforceError('Missing pricebook entry on quote line', {
@@ -552,14 +587,19 @@ export class SalesforceRestClient implements ISalesforceClient {
           Used_Amount__c: note.amount,
         }, correlationId);
       }
-      await this.update('Order', orderId, { Status: 'Order Placed' }, correlationId);
+      try {
+        await this.update('Order', orderId, { Status: 'Order Placed' }, correlationId);
+      } catch (statusErr) {
+        log.warn({ err: statusErr }, 'Failed to update Order status to "Order Placed"');
+        log.warn('Order was created in Draft status. Status update may require manual intervention or org-side automation.');
+      }
       const created = await this.getRecord<{
         Id: string;
         OrderNumber?: string;
       }>('Order', orderId, ['Id', 'OrderNumber'], correlationId);
       return {
         orderId, orderNumber: created.OrderNumber || orderId,
-        distributorId: context.salesforceAccountId, status: 'Order Placed',
+        distributorId: context.salesforceAccountId, status: 'Draft',
         totalAmount: quote.totalAmount, schemeDiscount: quote.schemeDiscount,
         discountAmount: quote.discountAmount, grandTotal: quote.grandTotal,
         taxAmount: quote.taxAmount, orderDate: today,
@@ -576,6 +616,9 @@ export class SalesforceRestClient implements ISalesforceClient {
       };
     } catch (err) {
       log.error({ err }, 'Failed to create order');
+      if (err instanceof SalesforceError) {
+        throw err;
+      }
       throw new SalesforceError('Order creation failed', {
         userMessage: orderId
           ? `Order header was created in Salesforce (${orderId}), but one or more line items failed. The order was left in Draft for review.`
@@ -884,6 +927,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       sourceAddress: '',
       destinationAddress: '',
       type: 'Secondary',
+      remainingQtys: [],
     };
   }
 
@@ -908,6 +952,7 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getDispatchRequests(): Promise<DispatchRequest[]> { throw new SalesforceError('Dispatch request retrieval not available (BLK-004).'); }
   async updateDispatchStatus(): Promise<DispatchRequest> { throw new SalesforceError('Dispatch status update not available (BLK-004).'); }
   async getSecondaryOrderGRN(): Promise<SecondaryOrderGRN> { throw new SalesforceError('Secondary order GRN not available (BLK-004).'); }
+  async fulfillSecondaryOrder(): Promise<FulfillmentResult> { throw new SalesforceError('Secondary order fulfillment: SecondaryInvoiceCreation is @AuraEnabled only (BLK-004).'); }
 
   async getARSConfig(_context: ResolvedDistributorContext, correlationId?: string): Promise<ArsConfig> {
     const result = await this.query<{ MasterLabel: string; Default_Order_Status__c?: string; Include_In_Transit__c?: boolean; Enable_Debug_Mode__c?: boolean; SystemModstamp?: string }>(

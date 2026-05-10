@@ -1,38 +1,11 @@
 import {
-  ISalesforceClient,
-  SalesforceQueryResult,
-  SalesforceDescribeResult,
-  SalesforceRecord,
-  ResolvedDistributorContext,
-  DMSProduct,
-  PrimaryOrderQuote,
-  PrimaryOrder,
-  PrimaryOrderDetail,
-  PrimaryOrderItemDetail,
-  GRNPayload,
-  GRNResult,
-  ReturnOrder,
-  ReturnOrderDetail,
-  Claim,
-  ClaimPayload,
-  FileUploadPayload,
-  FileUploadResult,
-  ApprovalResult,
-  ApprovalStatus,
-  CreditNote,
-  SecondaryOrder,
-  SecondaryOrderDetail,
-  InventoryAvailability,
-  InvoicePayload,
-  DMSInvoice,
-  DispatchRequest,
-  SecondaryOrderGRN,
-  ArsConfig,
-  ArsTriggeredOrder,
-  BatchStockPolicy,
-  AIBusinessInsight,
-  AIStockRecommendation,
-  AIUpsellRecommendation,
+  ISalesforceClient, SalesforceQueryResult, SalesforceDescribeResult, SalesforceRecord,
+  ResolvedDistributorContext, DMSProduct, PrimaryOrderQuote, PrimaryOrder, PrimaryOrderDetail,
+  GRNPayload, GRNResult, ReturnOrder, ReturnOrderDetail, Claim, ClaimPayload,
+  FileUploadPayload, FileUploadResult, ApprovalResult, ApprovalStatus, CreditNote,
+  SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, InvoicePayload, DMSInvoice,
+  DispatchRequest, SecondaryOrderGRN, ArsConfig, ArsTriggeredOrder, BatchStockPolicy,
+  AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation, FulfillmentResult,
 } from './types';
 
 const MOCK_ACCOUNTS: SalesforceRecord[] = [
@@ -433,6 +406,7 @@ export class MockSalesforceClient implements ISalesforceClient {
       invoiceIds: ['a03MOCK000000001'], dispatchIds: ['d04MOCK000000001'], grnIds: [],
       canCreateInvoice: true, canUpdateDispatch: true,
       sourceAddress: '123 Distributor Warehouse, Mumbai', destinationAddress: '456 Retail Store, Pune',
+      remainingQtys: [],
     };
   }
 
@@ -463,6 +437,17 @@ export class MockSalesforceClient implements ISalesforceClient {
 
   async getSecondaryOrderGRN(_ctx: ResolvedDistributorContext, orderId: string): Promise<SecondaryOrderGRN> {
     return { grnId: 'grnSO001', grnNumber: 'GRN-SO-0001', secondaryOrderId: orderId, status: 'Completed', items: [{ productId: '01tMOCK000000001', receivedQuantity: 30 }] };
+  }
+
+  async fulfillSecondaryOrder(_ctx: ResolvedDistributorContext, orderId: string): Promise<FulfillmentResult> {
+    const invId = `invMOCK_${Date.now().toString(36)}`;
+    return {
+      invoiceId: invId, invoiceNumber: `INV-SO-${invId.slice(-4)}`,
+      dispatchId: `dMOCK_${Date.now().toString(36)}`,
+      orderStatus: 'Fully Invoiced',
+      items: [{ productId: '01tMOCK000000001', productName: 'Beverage Pack A', fulfilledQty: 20, remainingQty: 10 }, { productId: '01tMOCK000000002', productName: 'Snack Box B', fulfilledQty: 15, remainingQty: 15 }],
+      isFull: false,
+    };
   }
 
   async getARSConfig(_ctx: ResolvedDistributorContext): Promise<ArsConfig> {

@@ -66,28 +66,59 @@ export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[
 export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTriggeredOrder[], batches: BatchStockPolicy[]): Block[] {
   const blocks: Block[] = [
     buildHeader(':gear: ARS Dashboard'),
-    buildSection(`*Mode:* Read-only\n*Default Order Status:* ${config.replenishmentFrequency}\n*Include In Transit:* ${config.autoReplenishmentEnabled ? 'Yes' : 'No'}\n*Last Modified:* ${config.lastModifiedBy} (${config.lastModifiedDate || 'N/A'})`),
+    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Frequency:* ${config.replenishmentFrequency}\n*Thresholds:* Min ${config.minThreshold} / Max ${config.maxThreshold}\n*Last Modified:* ${config.lastModifiedBy} (${config.lastModifiedDate})`),
     buildDivider(),
-    buildSection('ARS settings are shown from Salesforce metadata and inventory batch records. Updates are disabled until a writable Salesforce ARS endpoint is available.'),
+    buildSection(`*Active Product:* ${config.activeProducts.productName}\nCurrent: ${config.activeProducts.currentStock} | Min: ${config.activeProducts.minThreshold} | Max: ${config.activeProducts.maxThreshold}\nReorder Point: ${config.activeProducts.reorderPoint} | Reorder Qty: ${config.activeProducts.reorderQuantity}`),
     buildDivider(),
   ];
+  const toggleLabel = config.autoReplenishmentEnabled ? ':no_entry: Deactivate ARS' : ':white_check_mark: Activate ARS';
+  blocks.push({ type: 'actions', elements: [buildButton(toggleLabel, `toggle_ars_${!config.autoReplenishmentEnabled}`, String(!config.autoReplenishmentEnabled), config.autoReplenishmentEnabled ? 'danger' : 'primary')] });
+
+  if (batches.length > 0) {
+    blocks.push(buildDivider());
+    blocks.push(buildSection('*Batch-wise Stock (Edit Quantities)*'));
+    batches.forEach((b) => {
+      const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
+      blocks.push(buildSection(`${emoji} *${b.batchNumber}* \u2014 ${b.productName}\nStock: ${b.availableStock}`));
+      blocks.push({ type: 'input', block_id: `ars_min_${b.productId}`, label: { type: 'plain_text', text: `Min Stock for ${b.productName}`.slice(0, 150) }, element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}`, initial_value: String(b.minStock) } });
+      blocks.push({ type: 'input', block_id: `ars_max_${b.productId}`, label: { type: 'plain_text', text: `Max Stock for ${b.productName}`.slice(0, 150) }, element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}`, initial_value: String(b.maxStock) } });
+    });
+    blocks.push(buildDivider());
+    blocks.push({ type: 'actions', elements: [buildButton(':envelope: Submit ARS Changes for Approval', 'ars_submit_for_approval', 'ars_changes', 'primary')] });
+  }
 
   if (triggeredOrders.length > 0) {
     blocks.push(buildDivider());
     blocks.push(buildSection('*Triggered Replenishment Orders:*'));
     triggeredOrders.forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* \u2014 ${o.productName}\nQty: ${o.quantity} | Reason: ${o.reason}\nStock: ${o.currentStock} (Min: ${o.minThreshold}) | Status: ${o.status}`)));
   }
-
-  if (batches.length > 0) {
-    blocks.push(buildDivider());
-    blocks.push(buildSection('*Batch-wise Stock:*'));
-    batches.forEach((b) => {
-      const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
-      blocks.push(buildSection(`${emoji} *${b.batchNumber}* \u2014 ${b.productName}\nStock: ${b.availableStock} (Min: ${b.minStock} / Max: ${b.maxStock})${b.expiryDate ? ` | Expires: ${b.expiryDate}` : ''}\nStatus: ${b.replenishmentStatus}`));
-    });
-  }
-  blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
+}
+
+export function buildARSApprovalMessage(userName: string, accountName: string, changes: Array<{ productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }>): Block[] {
+  const blocks: Block[] = [
+    buildHeader(':gear: ARS Settings Change Request'),
+    buildSection(`*Requested by:* ${userName}\n*Distributor:* ${accountName}\n*Timestamp:* ${new Date().toLocaleString()}`),
+    buildDivider(),
+    buildSection('*Requested Changes:*'),
+  ];
+  changes.forEach((c) => {
+    blocks.push(buildSection(`*${c.productName}*\nMin: ${c.oldMin} \u2192 *${c.newMin}* | Max: ${c.oldMax} \u2192 *${c.newMax}*`));
+  });
+  blocks.push(buildDivider());
+  blocks.push(buildSection(':warning: *Action Required:* Approve or reject these changes.'));
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':white_check_mark: Approve', 'ars_approve_changes', 'approve', 'primary'),
+    buildButton(':x: Reject', 'ars_reject_changes', 'reject', 'danger'),
+  ]});
+  return blocks;
+}
+
+export function buildARSApprovalAcknowledgement(approved: boolean, userName: string): Block[] {
+  if (approved) {
+    return [buildHeader(':white_check_mark: ARS Settings Applied'), buildSection(`ARS settings changes submitted by *${userName}* have been applied.`)];
+  }
+  return [buildHeader(':x: ARS Settings Rejected'), buildSection(`ARS settings changes submitted by *${userName}* have been rejected.`)];
 }
 
 // -- AI Insights --

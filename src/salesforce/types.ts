@@ -562,6 +562,16 @@ export interface SecondaryOrderDetail extends SecondaryOrder {
   canUpdateDispatch: boolean;
   sourceAddress: string;
   destinationAddress: string;
+  remainingQtys: Array<{ productId: string; productName: string; orderedQty: number; remainingQty: number }>;
+}
+
+export interface FulfillmentResult {
+  invoiceId: string;
+  invoiceNumber: string;
+  dispatchId: string;
+  orderStatus: string;
+  items: Array<{ productId: string; productName: string; fulfilledQty: number; remainingQty: number }>;
+  isFull: boolean;
 }
 
 export interface InventoryAvailability {

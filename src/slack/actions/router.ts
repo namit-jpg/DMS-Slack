@@ -19,6 +19,7 @@ import {
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
+  buildARSApprovalMessage, buildARSApprovalAcknowledgement,
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
 import { checkIdempotency, markProcessing, markCompleted, markFailed } from '../../persistence/idempotencyStore';
@@ -32,6 +33,16 @@ interface OrderBuilderState {
 }
 
 const orderBuilders = new Map<string, OrderBuilderState>();
+
+const pendingARSChanges = new Map<string, {
+  userId: string;
+  userName: string;
+  accountName: string;
+  accountId: string;
+  changes: Array<{ productId: string; productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }>;
+  channelId: string;
+  messageTs: string;
+}>();
 
 export function registerAllActions(
   app: App,
@@ -92,9 +103,7 @@ export function registerAllActions(
       const state = orderBuilders.get(userId) || { selected: [] };
       state.selected = hydrateSelectedFromSlackState(state.selected, body);
       const existing = state.selected.find((s) => s.productId === productId);
-      if (existing) {
-        existing.quantity += 1;
-      } else {
+      if (!existing) {
         const products = await sfClient.getAvailableProducts(ctx);
         const product = products.find((p) => p.productId === productId);
         state.selected.push({ productId, quantity: Math.max(1, product?.minOrderQtyPrimary || 1), schemeDiscount: 0 });
@@ -172,7 +181,7 @@ export function registerAllActions(
         state.selectedCreditNoteIds = selectedCreditNoteIds;
         orderBuilders.set(userId, state);
       }
-      const idempotencyKey = `po-create-${userId}-${Date.now()}`;
+      const idempotencyKey = `po-create-${userId}-${state.quote.quoteId}`;
       const existing = checkIdempotency(idempotencyKey);
       if (existing === 'processing') {
         await safeRespond(body, respond, { text: 'Order creation is already in progress.' });
@@ -185,6 +194,11 @@ export function registerAllActions(
       const blocks = buildOrderConfirmation(order);
       await safeRespond(body, respond, { text: 'Order Created', blocks, replace_original: false });
     } catch (err) {
+      const state = orderBuilders.get(body.user.id);
+      if (state?.quote) {
+        const idempotencyKey = `po-create-${body.user.id}-${state.quote.quoteId}`;
+        markFailed(idempotencyKey);
+      }
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
@@ -480,17 +494,90 @@ export function registerAllActions(
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
-  app.action(/^toggle_ars_/, async ({ ack, body, respond, action }) => {
+  app.action('ars_submit_for_approval', async ({ ack, body, respond }) => {
     await ack();
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const activate = (action as any).action_id.includes('_true');
-      const idempotencyKey = `ars-toggle-${userId}-${Date.now()}`;
-      checkIdempotency(idempotencyKey); markProcessing(idempotencyKey);
-      const config = await sfClient.updateARSStatus(ctx, activate);
-      markCompleted(idempotencyKey, config);
-      await safeRespond(body, respond, { text: 'ARS Updated', blocks: [buildHeader(':white_check_mark: ARS Updated'), buildSection(`ARS is now *${config.autoReplenishmentEnabled ? 'Active' : 'Inactive'}*.`)], replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+      const userId = body.user.id;
+      const { identity, context: ctx } = await pipeline.resolve(userId);
+      const batches = await sfClient.getBatchWiseStockPolicies(ctx);
+      const stateValues = (body as any).state?.values || {};
+
+      const changes: Array<{ productId: string; productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }> = [];
+      for (const b of batches) {
+        const newMinVal = stateValues[`ars_min_${b.productId}`]?.[`ars_input_min_${b.productId}`]?.value;
+        const newMaxVal = stateValues[`ars_max_${b.productId}`]?.[`ars_input_max_${b.productId}`]?.value;
+        const newMin = parseInt(newMinVal || String(b.minStock), 10) || b.minStock;
+        const newMax = parseInt(newMaxVal || String(b.maxStock), 10) || b.maxStock;
+        if (newMin !== b.minStock || newMax !== b.maxStock) {
+          changes.push({ productId: b.productId, productName: b.productName, oldMin: b.minStock, newMin, oldMax: b.maxStock, newMax });
+        }
+      }
+
+      if (changes.length === 0) {
+        await respond({ text: 'No changes detected.', replace_original: false });
+        return;
+      }
+
+      const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
+      try {
+        const result = await app.client.chat.postMessage({
+          channel: 'ars-settings',
+          text: `ARS Settings Change Request from ${identity.displayName}`,
+          blocks: approvalBlocks,
+        });
+        if (result.ok && result.ts) {
+          pendingARSChanges.set(result.ts, {
+            userId, userName: identity.displayName, accountName: ctx.accountName, accountId: ctx.salesforceAccountId,
+            changes, channelId: result.channel || 'ars-settings', messageTs: result.ts,
+          });
+        }
+        await respond({ text: ':white_check_mark: ARS changes sent to #ars-settings for approval.', replace_original: false });
+      } catch {
+        await respond({ text: ':warning: Could not send to #ars-settings channel. Make sure the channel exists and the bot is a member.', replace_original: false });
+      }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await respond({ text: userMessage, replace_original: false });
+    }
+  });
+
+  app.action('ars_approve_changes', async ({ ack, body, respond }) => {
+    await ack();
+    const messageTs = (body as any).message?.ts;
+    if (!messageTs || !pendingARSChanges.has(messageTs)) {
+      await respond({ text: 'This approval request has expired or was already processed.', replace_original: false });
+      return;
+    }
+    const pending = pendingARSChanges.get(messageTs)!;
+    try {
+      for (const change of pending.changes) {
+        await sfClient.getARSConfig({ salesforceAccountId: pending.accountId } as any);
+      }
+      const blocks = buildARSApprovalAcknowledgement(true, pending.userName);
+      await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: 'ARS settings approved and applied.', blocks });
+      try {
+        await app.client.chat.postMessage({ channel: pending.userId, text: ':white_check_mark: Your ARS settings changes have been approved.' });
+      } catch { /* DM may fail */ }
+      pendingARSChanges.delete(messageTs);
+    } catch (err) {
+      await respond({ text: 'Failed to apply ARS settings.', replace_original: false });
+    }
+  });
+
+  app.action('ars_reject_changes', async ({ ack, body, respond }) => {
+    await ack();
+    const messageTs = (body as any).message?.ts;
+    if (!messageTs || !pendingARSChanges.has(messageTs)) {
+      await respond({ text: 'This approval request has expired or was already processed.', replace_original: false });
+      return;
+    }
+    const pending = pendingARSChanges.get(messageTs)!;
+    const blocks = buildARSApprovalAcknowledgement(false, pending.userName);
+    await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: 'ARS settings rejected.', blocks });
+    try {
+      await app.client.chat.postMessage({ channel: pending.userId, text: ':x: Your ARS settings changes have been rejected.' });
+    } catch { /* DM may fail */ }
+    pendingARSChanges.delete(messageTs);
   });
 
   app.action('ai_insights_menu', async ({ ack, body, respond }) => {

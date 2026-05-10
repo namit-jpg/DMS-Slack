@@ -9,7 +9,7 @@ const envSchema = z.object({
   USE_MOCK_SALESFORCE: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
   SALESFORCE_AUTH_MODE: z.enum(['SF_CLI', 'OAUTH_PASSWORD', 'CLIENT_CREDENTIALS']).default('OAUTH_PASSWORD'),
   SALESFORCE_CLI_TARGET_ORG: z.string().optional(),
-  SALESFORCE_API_VERSION: z.string().default('66.0'),
+  SALESFORCE_API_VERSION: z.string().default('62.0'),
   SALESFORCE_LOGIN_URL: z.string().optional().default('https://login.salesforce.com'),
   SALESFORCE_CLIENT_ID: z.string().optional(),
   SALESFORCE_CLIENT_SECRET: z.string().optional(),
