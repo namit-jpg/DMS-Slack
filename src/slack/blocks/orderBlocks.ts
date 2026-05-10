@@ -27,6 +27,15 @@ export function buildProductSelectionModal(
     blocks.push(buildDivider());
   }
   blocks.push(buildSection('Available products (click to select):'));
+  blocks.push({
+    type: 'input',
+    block_id: 'product_search_block',
+    label: { type: 'plain_text', text: ':mag: Search Products', emoji: true },
+    element: { type: 'plain_text_input', action_id: 'search_products_input', placeholder: { type: 'plain_text', text: 'Type product name or code...' } },
+    optional: true,
+  });
+  blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_products_button', 'search', 'primary')] });
+  blocks.push(buildDivider());
   products.slice(0, 10).forEach((p) => {
     blocks.push({
       type: 'section',
@@ -107,18 +116,34 @@ export function buildOrderConfirmation(order: PrimaryOrder): Block[] {
   ];
 }
 
-export function buildOrderListBlocks(orders: PrimaryOrder[]): Block[] {
+export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): Block[] {
+  const filtered = searchTerm
+    ? orders.filter((o) => o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+    : orders;
   if (orders.length === 0) return [buildHeader(':clipboard: My Primary Orders'), buildSection('No orders found.'), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
   const blocks: Block[] = [buildHeader(':clipboard: My Primary Orders'), buildDivider()];
-  orders.slice(0, 15).forEach((o) => {
-    const emoji = o.status === 'Approved' ? ':white_check_mark:' : o.status === 'Pending' ? ':hourglass_flowing_sand:' : o.status === 'Draft' ? ':pencil2:' : ':grey_question:';
-    blocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${o.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Date: ${o.orderDate}\nApproval: ${o.approvalStatus || 'N/A'}` },
-      accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_po_detail_${o.orderId}`, value: o.orderId },
-    });
-    blocks.push(buildDivider());
+  blocks.push({
+    type: 'input',
+    block_id: 'order_search_block',
+    label: { type: 'plain_text', text: ':mag: Search Orders', emoji: true },
+    element: { type: 'plain_text_input', action_id: 'search_orders_input', placeholder: { type: 'plain_text', text: 'Type order number...' }, initial_value: searchTerm || undefined },
+    optional: true,
   });
+  blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_orders_button', 'search', 'primary')] });
+  blocks.push(buildDivider());
+  if (filtered.length === 0) {
+    blocks.push(buildSection(`No orders match "${searchTerm}".`));
+  } else {
+    filtered.slice(0, 15).forEach((o) => {
+      const emoji = o.status === 'Approved' ? ':white_check_mark:' : o.status === 'Pending' ? ':hourglass_flowing_sand:' : o.status === 'Draft' ? ':pencil2:' : ':grey_question:';
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${o.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Date: ${o.orderDate}\nApproval: ${o.approvalStatus || 'N/A'}` },
+        accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_po_detail_${o.orderId}`, value: o.orderId },
+      });
+      blocks.push(buildDivider());
+    });
+  }
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }

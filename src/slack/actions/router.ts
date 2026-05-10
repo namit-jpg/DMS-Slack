@@ -79,6 +79,27 @@ export function registerAllActions(
     });
   };
 
+  app.action('search_products_button', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).state?.values || {};
+      const searchTerm = (stateValues.product_search_block?.search_products_input?.value || '').toLowerCase();
+      const allProducts = await sfClient.getAvailableProducts(ctx);
+      const filtered = searchTerm
+        ? allProducts.filter((p) => p.productName.toLowerCase().includes(searchTerm) || (p.productCode || '').toLowerCase().includes(searchTerm))
+        : allProducts;
+      const state = orderBuilders.get(userId) || { selected: [] };
+      const blocks = buildProductSelectionModal(filtered, state.selected);
+      const label = searchTerm ? `Search results for "${searchTerm}"` : 'All products';
+      await safeRespond(body, respond, { text: label, blocks, replace_original: true });
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
+  });
+
   app.action(SLACK_ACTION_IDS.SELECT_ORDER_TYPE, async ({ ack, body, respond }) => {
     await ack();
     try {
@@ -215,6 +236,22 @@ export function registerAllActions(
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, blocks: buildUserErrorBlocks(userMessage), replace_original: false });
+    }
+  });
+
+  app.action('search_orders_button', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).state?.values || {};
+      const searchTerm = (stateValues.order_search_block?.search_orders_input?.value || '').trim();
+      const orders = await sfClient.getPrimaryOrders(ctx);
+      const blocks = buildOrderListBlocks(orders, searchTerm);
+      await safeRespond(body, respond, { text: `Orders matching "${searchTerm}"`, blocks, replace_original: true });
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
   });
 
@@ -437,6 +474,19 @@ export function registerAllActions(
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
+  app.action('search_so_button', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).state?.values || {};
+      const searchTerm = (stateValues.so_search_block?.search_so_input?.value || '').trim();
+      const orders = await sfClient.getSecondaryOrders(ctx);
+      const blocks = buildSecondaryOrderList(orders, searchTerm);
+      await safeRespond(body, respond, { text: `Secondary orders matching "${searchTerm}"`, blocks, replace_original: true });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
   app.action(/^view_so_detail_/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
@@ -521,7 +571,7 @@ export function registerAllActions(
       const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
       try {
         const result = await app.client.chat.postMessage({
-          channel: 'ars-settings',
+          channel: 'sales',
           text: `ARS Settings Change Request from ${identity.displayName}`,
           blocks: approvalBlocks,
         });

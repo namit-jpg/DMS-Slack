@@ -5,13 +5,29 @@ import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 type Block = any;
 
 // -- Secondary Orders --
-export function buildSecondaryOrderList(orders: SecondaryOrder[]): Block[] {
+export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = ''): Block[] {
+  const filtered = searchTerm
+    ? orders.filter((o) => o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase()) || o.retailerCustomer.toLowerCase().includes(searchTerm.toLowerCase()))
+    : orders;
   if (orders.length === 0) return [buildHeader(':twisted_rightwards_arrows: Secondary Orders'), buildSection('No secondary orders found.'), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
   const blocks: Block[] = [buildHeader(':twisted_rightwards_arrows: Secondary Orders'), buildDivider()];
-  orders.slice(0, 15).forEach((o) => {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | Invoice: ${o.invoiceStatus} | Dispatch: ${o.dispatchStatus}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus}` }, accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details' }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId } });
-    blocks.push(buildDivider());
+  blocks.push({
+    type: 'input',
+    block_id: 'so_search_block',
+    label: { type: 'plain_text', text: ':mag: Search Secondary Orders', emoji: true },
+    element: { type: 'plain_text_input', action_id: 'search_so_input', placeholder: { type: 'plain_text', text: 'Type order number or retailer...' }, initial_value: searchTerm || undefined },
+    optional: true,
   });
+  blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_so_button', 'search', 'primary')] });
+  blocks.push(buildDivider());
+  if (filtered.length === 0) {
+    blocks.push(buildSection(`No orders match "${searchTerm}".`));
+  } else {
+    filtered.slice(0, 15).forEach((o) => {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | Invoice: ${o.invoiceStatus} | Dispatch: ${o.dispatchStatus}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus}` }, accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details' }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId } });
+      blocks.push(buildDivider());
+    });
+  }
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }
