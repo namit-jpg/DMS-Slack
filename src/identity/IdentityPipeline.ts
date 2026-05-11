@@ -64,11 +64,11 @@ export class IdentityPipeline {
       };
     }
 
-    const message = err instanceof Error ? err.message : String(err);
+    const isSlackPlatformError = (err as any)?.code === 'slack_webapi_platform_error';
     logger.error({ err }, 'Unhandled error in identity pipeline');
     return {
       text: 'Something went wrong. Please try again.',
-      userMessage: message,
+      userMessage: isSlackPlatformError ? 'Something went wrong. Please try again.' : (err instanceof Error ? err.message : String(err)),
     };
   }
 }

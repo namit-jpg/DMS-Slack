@@ -108,11 +108,8 @@ export function registerAllActions(
 
       const blocks = buildProductSelectionModal(filtered, state.selected);
       const label = searchTerm ? `Search: "${searchTerm}" (${filtered.length} results)` : `All products (${filtered.length})`;
-      if (typeof respond === 'function') {
-        await respond({ text: label, blocks, replace_original: true });
-      } else {
-        await app.client.chat.postEphemeral({ channel: body.channel?.id || userId, user: userId, text: label, blocks });
-      }
+      await safeRespond(body, respond, { text: label, blocks, replace_original: true });
+
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       logger.error({ err }, 'Search failed');
@@ -264,7 +261,7 @@ export function registerAllActions(
     try {
       const userId = body.user.id;
       const { context: ctx } = await pipeline.resolve(userId);
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const searchTerm = (stateValues.order_search_block?.search_orders_input?.value || '').trim();
       const orders = await sfClient.getPrimaryOrders(ctx);
       const blocks = buildOrderListBlocks(orders, searchTerm);
@@ -313,13 +310,14 @@ export function registerAllActions(
       const orderId = (action as any).value;
       const detail = await sfClient.getPrimaryOrderDetails(ctx, orderId);
       const payload: GRNPayload = { items: [], notes: '' };
+      const grnState = (body as any).view?.state?.values || (body as any).state?.values || {};
       for (const li of detail.items) {
-        const recv = parseInt((body as any).state?.values?.[`grn_recv_${li.productId}`]?.[`grn_input_recv_${li.productId}`]?.value || '0') || 0;
-        const dmg = parseInt((body as any).state?.values?.[`grn_dmg_${li.productId}`]?.[`grn_input_dmg_${li.productId}`]?.value || '0') || 0;
-        const miss = parseInt((body as any).state?.values?.[`grn_miss_${li.productId}`]?.[`grn_input_miss_${li.productId}`]?.value || '0') || 0;
+        const recv = parseInt(grnState[`grn_recv_${li.productId}`]?.[`grn_input_recv_${li.productId}`]?.value || '0') || 0;
+        const dmg = parseInt(grnState[`grn_dmg_${li.productId}`]?.[`grn_input_dmg_${li.productId}`]?.value || '0') || 0;
+        const miss = parseInt(grnState[`grn_miss_${li.productId}`]?.[`grn_input_miss_${li.productId}`]?.value || '0') || 0;
         payload.items.push({ productId: li.productId, expectedQuantity: li.expectedQuantity, receivedQuantity: recv, damagedQuantity: dmg, missingQuantity: miss });
       }
-      payload.notes = (body as any).state?.values?.grn_notes?.grn_input_notes?.value || '';
+      payload.notes = grnState.grn_notes?.grn_input_notes?.value || '';
 
       const idempotencyKey = `grn-create-${userId}-${orderId}-${Date.now()}`;
       checkIdempotency(idempotencyKey);
@@ -384,7 +382,7 @@ export function registerAllActions(
       const userId = body.user.id;
       const { context: ctx } = await pipeline.resolve(userId);
       const returnOrderId = (action as any).action_id.replace('submit_claim_', '');
-      const values = (body as any).state?.values || {};
+      const values = (body as any).view?.state?.values || (body as any).state?.values || {};
       const claimType = values.claim_type?.claim_input_type?.selected_option?.value || 'Other';
       const amount = parseFloat(values.claim_amount?.claim_input_amount?.value || '0') || 0;
       const desc = values.claim_desc?.claim_input_desc?.value || '';
@@ -499,7 +497,7 @@ export function registerAllActions(
     try {
       const userId = body.user.id;
       const { context: ctx } = await pipeline.resolve(userId);
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const searchTerm = (stateValues.so_search_block?.search_so_input?.value || '').trim();
       const orders = await sfClient.getSecondaryOrders(ctx);
       const blocks = buildSecondaryOrderList(orders, searchTerm);
