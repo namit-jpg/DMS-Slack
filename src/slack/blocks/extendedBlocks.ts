@@ -107,8 +107,11 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
   if (filtered.length === 0) {
     blocks.push(buildSection(searchTerm ? `No products match "${searchTerm}".` : 'No batch stock data available.'));
   } else {
-    blocks.push(buildSection(`*Products (${filtered.length})*`));
-    filtered.forEach((b) => {
+    const PAGE_SIZE = 28;
+    const visible = filtered.slice(0, PAGE_SIZE);
+    const truncated = filtered.length > PAGE_SIZE;
+    blocks.push(buildSection(`*Products (${visible.length}${truncated ? ` of ${filtered.length}` : ''})*${truncated ? ' — use search to find others' : ''}`));
+    visible.forEach((b) => {
       const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
       const batchValue = JSON.stringify({ productId: b.productId, productName: b.productName, batchNumber: b.batchNumber, minStock: b.minStock, maxStock: b.maxStock, availableStock: b.availableStock });
       blocks.push(buildSection(`${emoji} *${b.productName}* (${b.batchNumber})\nStock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
@@ -117,7 +120,6 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
         buildButton(':memo: Request Change', `ars_request_change_${b.productId}`, batchValue),
         buildButton(':x: Deactivate', `ars_deactivate_product_${b.productId}`, batchValue, 'danger'),
       ]});
-      blocks.push(buildDivider());
     });
   }
 

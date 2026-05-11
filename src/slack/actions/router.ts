@@ -699,7 +699,7 @@ export function registerAllActions(
     await ack();
     const messageTs = (body as any).message?.ts;
     if (!messageTs || !pendingARSChanges.has(messageTs)) {
-      await respond({ text: 'This approval request has expired or was already processed.', replace_original: false });
+      await safeRespond(body, respond, { text: 'This approval request has expired or was already processed.', replace_original: false });
       return;
     }
     const pending = pendingARSChanges.get(messageTs)!;
@@ -714,7 +714,7 @@ export function registerAllActions(
       } catch { /* DM may fail */ }
       pendingARSChanges.delete(messageTs);
     } catch (err) {
-      await respond({ text: 'Failed to apply ARS settings.', replace_original: false });
+      await safeRespond(body, respond, { text: 'Failed to apply ARS settings.', replace_original: false });
     }
   });
 
@@ -722,7 +722,7 @@ export function registerAllActions(
     await ack();
     const messageTs = (body as any).message?.ts;
     if (!messageTs || !pendingARSChanges.has(messageTs)) {
-      await respond({ text: 'This approval request has expired or was already processed.', replace_original: false });
+      await safeRespond(body, respond, { text: 'This approval request has expired or was already processed.', replace_original: false });
       return;
     }
     const pending = pendingARSChanges.get(messageTs)!;
