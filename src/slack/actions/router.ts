@@ -618,21 +618,39 @@ export function registerAllActions(
       }];
 
       const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
+      const salesChannel = process.env.SLACK_SALES_CHANNEL || 'sales';
       try {
+        try { await app.client.conversations.join({ channel: salesChannel }); } catch { /* join may not be available if already member or lacking scope */ }
         const result = await app.client.chat.postMessage({
-          channel: 'sales',
+          channel: salesChannel,
           text: `ARS Change from ${identity.displayName}: ${info.productName}`,
           blocks: approvalBlocks,
         });
         if (result.ok && result.ts) {
           pendingARSChanges.set(result.ts, {
             userId, userName: identity.displayName, accountName: ctx.accountName, accountId: ctx.salesforceAccountId,
-            changes, channelId: result.channel || 'sales', messageTs: result.ts,
+            changes, channelId: result.channel || salesChannel, messageTs: result.ts,
           });
         }
-        await safeRespond(body, respond, { text: `:white_check_mark: ARS change for ${info.productName} sent to #sales for approval.`, replace_original: false });
-      } catch {
-        await safeRespond(body, respond, { text: ':warning: Could not send to #sales channel.', replace_original: false });
+        await safeRespond(body, respond, { text: `:white_check_mark: ARS change for ${info.productName} sent to #${salesChannel} for approval.`, replace_original: false });
+      } catch (channelErr: any) {
+        logger.warn({ err: channelErr, salesChannel }, 'Could not post ARS approval to channel, falling back to DM');
+        try {
+          const dmResult = await app.client.chat.postMessage({
+            channel: userId,
+            text: `ARS Change Request — ${info.productName}`,
+            blocks: approvalBlocks,
+          });
+          if (dmResult.ok && dmResult.ts) {
+            pendingARSChanges.set(dmResult.ts, {
+              userId, userName: identity.displayName, accountName: ctx.accountName, accountId: ctx.salesforceAccountId,
+              changes, channelId: dmResult.channel || userId, messageTs: dmResult.ts,
+            });
+          }
+          await safeRespond(body, respond, { text: `:white_check_mark: ARS change request submitted. Sent to your DMs for approval (bot needs to be invited to #${salesChannel} for channel notifications).`, replace_original: false });
+        } catch {
+          await safeRespond(body, respond, { text: `:warning: Could not submit ARS change request. Please invite the bot to #${salesChannel} and try again.`, replace_original: false });
+        }
       }
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -677,15 +695,28 @@ export function registerAllActions(
       const info = typeof value === 'string' ? JSON.parse(value) : value;
       const newMin = newMinVal ? (parseInt(newMinVal, 10) || info.minStock) : info.minStock;
       const newMax = newMaxVal ? (parseInt(newMaxVal, 10) || info.maxStock) : info.maxStock;
+      const crApprovalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, [{ productName: info.productName, oldMin: info.minStock, newMin, oldMax: info.maxStock, newMax }]);
+      const salesChannel = process.env.SLACK_SALES_CHANNEL || 'sales';
       try {
+        try { await app.client.conversations.join({ channel: salesChannel }); } catch { /* join may not be available */ }
         await app.client.chat.postMessage({
-          channel: 'sales',
+          channel: salesChannel,
           text: `ARS Change Request from ${identity.displayName}: ${info.productName}`,
-          blocks: buildARSApprovalMessage(identity.displayName, ctx.accountName, [{ productName: info.productName, oldMin: info.minStock, newMin, oldMax: info.maxStock, newMax }]),
+          blocks: crApprovalBlocks,
         });
-        await safeRespond(body, respond, { text: `:white_check_mark: Change request for ${info.productName} submitted to #sales.\n*Reason:* ${reason}`, replace_original: false });
-      } catch {
-        await safeRespond(body, respond, { text: ':warning: Could not send to #sales channel. Please contact your admin.', replace_original: false });
+        await safeRespond(body, respond, { text: `:white_check_mark: Change request for ${info.productName} submitted to #${salesChannel}.\n*Reason:* ${reason}`, replace_original: false });
+      } catch (channelErr: any) {
+        logger.warn({ err: channelErr, salesChannel }, 'Could not post ARS change request to channel, falling back to DM');
+        try {
+          await app.client.chat.postMessage({
+            channel: userId,
+            text: `ARS Change Request — ${info.productName}\nReason: ${reason}`,
+            blocks: crApprovalBlocks,
+          });
+          await safeRespond(body, respond, { text: `:white_check_mark: Change request for ${info.productName} submitted. Sent to your DMs (invite the bot to #${salesChannel} for direct channel notifications).\n*Reason:* ${reason}`, replace_original: false });
+        } catch {
+          await safeRespond(body, respond, { text: `:warning: Could not submit change request. Please invite the bot to #${salesChannel} and try again.`, replace_original: false });
+        }
       }
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
