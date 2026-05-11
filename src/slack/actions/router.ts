@@ -19,7 +19,7 @@ import {
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
-  buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditMode,
+  buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditProduct,
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
 import { checkIdempotency, markProcessing, markCompleted, markFailed } from '../../persistence/idempotencyStore';
@@ -56,15 +56,18 @@ export function registerAllActions(
     message: { text?: string; blocks?: any[]; replace_original?: boolean; [key: string]: unknown },
   ) => {
     if (typeof respond === 'function') {
-      await (respond as (message: unknown) => Promise<void>)(message);
-      return;
+      try {
+        await (respond as (message: unknown) => Promise<void>)(message);
+        return;
+      } catch (err: any) {
+        if (err?.data?.error !== 'messages_tab_disabled') {
+          logger.warn({ err }, 'respond() failed, falling back to home tab');
+        }
+      }
     }
 
     const userId = body?.user?.id;
-    if (!userId) {
-      logger.warn('Unable to respond to Slack action without user id');
-      return;
-    }
+    if (!userId) return;
 
     const blocks = message.blocks && message.blocks.length > 0
       ? message.blocks
@@ -72,10 +75,7 @@ export function registerAllActions(
 
     await app.client.views.publish({
       user_id: userId,
-      view: {
-        type: 'home',
-        blocks,
-      },
+      view: { type: 'home', blocks },
     });
   };
 
@@ -555,14 +555,79 @@ export function registerAllActions(
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
       let batches: BatchStockPolicy[] = [];
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-
       const resolvedConfig: ArsConfig = {
         autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
         minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
-
       const blocks = buildARSDashboard(resolvedConfig, [], batches);
       await safeRespond(body, respond, { text: 'ARS Dashboard', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('ars_search_button', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).state?.values || {};
+      const searchTerm = (stateValues.ars_search_block?.ars_search_input?.value || '').trim().toLowerCase();
+      let batches: BatchStockPolicy[] = [];
+      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
+      const resolvedConfig: ArsConfig = {
+        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
+      };
+      const blocks = buildARSDashboard(resolvedConfig, [], batches, searchTerm);
+      await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^ars_edit_product_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const productId = (action as any).action_id.replace('ars_edit_product_', '');
+      const value = (action as any).value || '{}';
+      const info = typeof value === 'string' ? JSON.parse(value) : value;
+      const blocks = buildARSEditProduct(info);
+      await safeRespond(body, respond, { text: `Edit ARS — ${info.productName}`, blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^ars_submit_product_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { identity, context: ctx } = await pipeline.resolve(userId);
+      const productId = (action as any).action_id.replace('ars_submit_product_', '');
+      const stateValues = (body as any).state?.values || {};
+      const newMinVal = stateValues.ars_edit_min?.ars_edit_min_val?.value;
+      const newMaxVal = stateValues.ars_edit_max?.ars_edit_max_val?.value;
+      const value = (action as any).value || '{}';
+      const info = typeof value === 'string' ? JSON.parse(value) : value;
+      const newMin = parseInt(newMinVal || String(info.minStock), 10) || info.minStock;
+      const newMax = parseInt(newMaxVal || String(info.maxStock), 10) || info.maxStock;
+
+      const changes = [{
+        productId, productName: info.productName,
+        oldMin: info.minStock, newMin, oldMax: info.maxStock, newMax,
+      }];
+
+      const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
+      try {
+        const result = await app.client.chat.postMessage({
+          channel: 'sales',
+          text: `ARS Change from ${identity.displayName}: ${info.productName}`,
+          blocks: approvalBlocks,
+        });
+        if (result.ok && result.ts) {
+          pendingARSChanges.set(result.ts, {
+            userId, userName: identity.displayName, accountName: ctx.accountName, accountId: ctx.salesforceAccountId,
+            changes, channelId: result.channel || 'sales', messageTs: result.ts,
+          });
+        }
+        await safeRespond(body, respond, { text: `:white_check_mark: ARS change for ${info.productName} sent to #sales for approval.`, replace_original: false });
+      } catch {
+        await safeRespond(body, respond, { text: ':warning: Could not send to #sales channel.', replace_original: false });
+      }
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
@@ -584,67 +649,6 @@ export function registerAllActions(
       const blocks = buildARSDashboard(resolvedConfig, [], batches, searchTerm);
       await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
-  });
-
-  app.action('ars_edit_mode', async ({ ack, body, respond }) => {
-    await ack();
-    try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      let batches: BatchStockPolicy[] = [];
-      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-      const blocks = buildARSEditMode(batches);
-      await safeRespond(body, respond, { text: 'Edit ARS Settings', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
-  });
-
-  app.action('ars_submit_for_approval', async ({ ack, body, respond }) => {
-    await ack();
-    try {
-      const userId = body.user.id;
-      const { identity, context: ctx } = await pipeline.resolve(userId);
-      const batches = await sfClient.getBatchWiseStockPolicies(ctx);
-      const stateValues = (body as any).state?.values || {};
-
-      const changes: Array<{ productId: string; productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }> = [];
-      const editableCount = Math.min(5, batches.length);
-      for (let i = 0; i < editableCount; i++) {
-        const b = batches[i];
-        const blockKey = `${b.productId}_${i}`;
-        const newMinVal = stateValues[`ars_min_${blockKey}`]?.[`ars_input_min_${blockKey}`]?.value;
-        const newMaxVal = stateValues[`ars_max_${blockKey}`]?.[`ars_input_max_${blockKey}`]?.value;
-        const newMin = parseInt(newMinVal || String(b.minStock), 10) || b.minStock;
-        const newMax = parseInt(newMaxVal || String(b.maxStock), 10) || b.maxStock;
-        if (newMin !== b.minStock || newMax !== b.maxStock) {
-          changes.push({ productId: b.productId, productName: b.productName, oldMin: b.minStock, newMin, oldMax: b.maxStock, newMax });
-        }
-      }
-
-      if (changes.length === 0) {
-        await respond({ text: 'No changes detected.', replace_original: false });
-        return;
-      }
-
-      const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
-      try {
-        const result = await app.client.chat.postMessage({
-          channel: 'sales',
-          text: `ARS Settings Change Request from ${identity.displayName}`,
-          blocks: approvalBlocks,
-        });
-        if (result.ok && result.ts) {
-          pendingARSChanges.set(result.ts, {
-            userId, userName: identity.displayName, accountName: ctx.accountName, accountId: ctx.salesforceAccountId,
-            changes, channelId: result.channel || 'ars-settings', messageTs: result.ts,
-          });
-        }
-        await respond({ text: ':white_check_mark: ARS changes sent to #ars-settings for approval.', replace_original: false });
-      } catch {
-        await respond({ text: ':warning: Could not send to #ars-settings channel. Make sure the channel exists and the bot is a member.', replace_original: false });
-      }
-    } catch (err) {
-      const { userMessage } = pipeline.resolveUserFacingMessage(err);
-      await respond({ text: userMessage, replace_original: false });
-    }
   });
 
   app.action('ars_approve_changes', async ({ ack, body, respond }) => {

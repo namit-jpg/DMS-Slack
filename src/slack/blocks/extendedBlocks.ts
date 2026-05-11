@@ -91,71 +91,63 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
     : batches;
   const blocks: Block[] = [
     buildHeader(':gear: ARS Dashboard'),
-    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Frequency:* ${config.replenishmentFrequency}\n*Total Batches:* ${batches.length}${searchTerm ? ` (showing ${filtered.length} matching)` : ''}`),
-    buildDivider(),
+    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Total Batches:* ${batches.length}${searchTerm ? ` • Matching: ${filtered.length}` : ''}`),
   ];
-
+  blocks.push(buildDivider());
   blocks.push({
     type: 'input',
     block_id: 'ars_search_block',
-    label: { type: 'plain_text', text: ':mag: Search Products', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'ars_search_input', placeholder: { type: 'plain_text', text: 'Type product name or batch number...' }, initial_value: searchTerm || undefined },
+    label: { type: 'plain_text', text: ':mag: Search Product', emoji: true },
+    element: { type: 'plain_text_input', action_id: 'ars_search_input', placeholder: { type: 'plain_text', text: 'Type product name to find and edit...' }, initial_value: searchTerm || undefined },
     optional: true,
   });
   blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'ars_search_button', 'search', 'primary')] });
   blocks.push(buildDivider());
 
   if (filtered.length === 0) {
-    blocks.push(buildSection(`No batches match "${searchTerm}".`));
+    blocks.push(buildSection(searchTerm ? `No products match "${searchTerm}".` : 'No batch stock data available.'));
   } else {
-    blocks.push(buildSection(`*Batch-wise Stock (${filtered.length} batches)*`));
+    blocks.push(buildSection(`*Products (${filtered.length})*`));
     filtered.forEach((b) => {
       const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
-      blocks.push(buildSection(`${emoji} *${b.batchNumber}* — ${b.productName} | Stock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `${emoji} *${b.productName}* (${b.batchNumber})\nStock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}` },
+        accessory: { type: 'button', text: { type: 'plain_text', text: ':pencil2: Edit', emoji: true }, action_id: `ars_edit_product_${b.productId}`, value: JSON.stringify({ productId: b.productId, productName: b.productName, batchNumber: b.batchNumber, minStock: b.minStock, maxStock: b.maxStock, availableStock: b.availableStock }) },
+      });
+      blocks.push(buildDivider());
     });
   }
 
-  blocks.push(buildDivider());
-  blocks.push({ type: 'actions', elements: [
-    buildButton(':pencil2: Edit ARS Settings', 'ars_edit_mode', 'edit', 'primary'),
-    buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
-  ]});
-
   if (triggeredOrders.length > 0) {
-    blocks.push(buildDivider());
-    blocks.push(buildSection(`*Triggered Replenishment Orders (${triggeredOrders.length}):*`));
-    triggeredOrders.slice(0, 3).forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* — ${o.productName} | Qty: ${o.quantity} | ${o.reason}\nStock: ${o.currentStock} (Min: ${o.minThreshold}) | Status: ${o.status}`)));
+    blocks.push(buildSection(`*Replenishment Orders (${triggeredOrders.length}):*`));
+    triggeredOrders.slice(0, 3).forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* — ${o.productName} | Qty: ${o.quantity} | ${o.reason}\nStock: ${o.currentStock} | Status: ${o.status}`)));
   }
+  blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
   return blocks;
 }
 
-export function buildARSEditMode(batches: BatchStockPolicy[]): Block[] {
-  const editableCount = Math.min(5, batches.length);
-  const blocks: Block[] = [
-    buildHeader(':pencil2: Edit ARS Settings'),
-    buildSection(`Edit min/max quantities for the first ${editableCount} batch(es). Changes require approval in #sales.`),
+export function buildARSEditProduct(productInfo: { productId: string; productName: string; batchNumber: string; minStock: number; maxStock: number; availableStock: number }): Block[] {
+  return [
+    buildHeader(`:pencil2: Edit ARS — ${productInfo.productName}`),
+    buildSection(`*Batch:* ${productInfo.batchNumber}\n*Current Stock:* ${productInfo.availableStock}\n*Current Min:* ${productInfo.minStock} | *Current Max:* ${productInfo.maxStock}`),
     buildDivider(),
+    {
+      type: 'input', block_id: 'ars_edit_min',
+      label: { type: 'plain_text', text: 'Minimum Stock Quantity' },
+      element: { type: 'plain_text_input', action_id: 'ars_edit_min_val', initial_value: String(productInfo.minStock) },
+    },
+    {
+      type: 'input', block_id: 'ars_edit_max',
+      label: { type: 'plain_text', text: 'Maximum Stock Quantity' },
+      element: { type: 'plain_text_input', action_id: 'ars_edit_max_val', initial_value: String(productInfo.maxStock) },
+    },
+    buildDivider(),
+    { type: 'actions', elements: [
+      buildButton(':envelope: Submit for Approval', `ars_submit_product_${productInfo.productId}`, productInfo.productId, 'primary'),
+      buildButton(':arrow_left: Back to ARS', 'ars_menu', 'back'),
+    ]},
   ];
-  for (let i = 0; i < editableCount; i++) {
-    const b = batches[i];
-    blocks.push(buildSection(`*${b.batchNumber}* — ${b.productName} | Current Stock: ${b.availableStock}`));
-    blocks.push({
-      type: 'input', block_id: `ars_min_${b.productId}_${i}`,
-      label: { type: 'plain_text', text: `Min for ${b.productName}`.slice(0, 150) },
-      element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}_${i}`, initial_value: String(b.minStock) },
-    });
-    blocks.push({
-      type: 'input', block_id: `ars_max_${b.productId}_${i}`,
-      label: { type: 'plain_text', text: `Max for ${b.productName}`.slice(0, 150) },
-      element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}_${i}`, initial_value: String(b.maxStock) },
-    });
-  }
-  blocks.push(buildDivider());
-  blocks.push({ type: 'actions', elements: [
-    buildButton(':envelope: Submit ARS Changes for Approval', 'ars_submit_for_approval', 'ars_changes', 'primary'),
-    buildButton(':arrow_left: Back to ARS Dashboard', 'ars_menu', 'back'),
-  ]});
-  return blocks;
 }
 
 export function buildARSApprovalMessage(userName: string, accountName: string, changes: Array<{ productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }>): Block[] {
