@@ -5,6 +5,8 @@ import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrderQuote, GRNPa
 import { getClientMode } from '../../salesforce/SalesforceClient';
 import { BLOCKERS } from '../../salesforce/blockers';
 import { InsightsService } from '../../services/InsightsService';
+import { ReportsService } from '../../services/ReportsService';
+import { buildReportDashboardBlocks } from '../blocks/reportBlocks';
 import { buildMainMenuBlocks, buildUserErrorBlocks, buildSection, buildHeader, buildDivider, buildButton, buildContext } from '../blocks/commonBlocks';
 import { buildDashboardView } from '../blocks/dashboardBlocks';
 import { buildInsightBlocks } from '../blocks/insightBlocks';
@@ -50,6 +52,8 @@ export function registerAllActions(
   sfClient: ISalesforceClient,
   insightsService: InsightsService,
 ) {
+  const reportsService = new ReportsService(sfClient);
+
   const safeRespond = async (
     body: any,
     respond: unknown,
@@ -455,8 +459,8 @@ export function registerAllActions(
     try {
       const userId = body.user.id;
       const { context: ctx } = await pipeline.resolve(userId);
-      const insightsResult = await insightsService.getBusinessInsights(ctx);
-      const blocks = insightsResult.success ? buildInsightBlocks(insightsResult.data) : buildInsightBlocks([]);
+      const data = await reportsService.fetchAllReportData(ctx);
+      const blocks = buildReportDashboardBlocks(data);
       await safeRespond(body, respond, { text: 'Business Insights', blocks, replace_original: false });
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);

@@ -86,53 +86,97 @@ export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[
 
 // -- ARS --
 export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTriggeredOrder[], batches: BatchStockPolicy[], searchTerm = ''): Block[] {
+  // Search-first design: main view is minimal (8 blocks max).
+  // Action buttons only appear on filtered search results (max 10 products).
   const filtered = searchTerm
-    ? batches.filter((b) => b.productName.toLowerCase().includes(searchTerm.toLowerCase()) || b.batchNumber.toLowerCase().includes(searchTerm.toLowerCase()))
-    : batches;
+    ? batches.filter((b) =>
+        b.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        b.batchNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+    : [];
+
+  const statusLabel = config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive';
+  const below = batches.filter((b) => b.replenishmentStatus === 'Below Min').length;
+  const warning = batches.filter((b) => b.replenishmentStatus === 'Warning').length;
+
   const blocks: Block[] = [
     buildHeader(':gear: ARS Dashboard'),
-    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Total Batches:* ${batches.length}${searchTerm ? ` • Matching: ${filtered.length}` : ''}`),
+    buildSection(
+      `*Status:* ${statusLabel}  |  *Batches:* ${batches.length}` +
+      (below > 0 ? `  |  :red_circle: Below Min: ${below}` : '') +
+      (warning > 0 ? `  |  :yellow_circle: Warning: ${warning}` : ''),
+    ),
+    buildDivider(),
+    {
+      type: 'input',
+      block_id: 'ars_search_block',
+      label: { type: 'plain_text', text: ':mag: Search to Edit a Product', emoji: true },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'ars_search_input',
+        placeholder: { type: 'plain_text', text: 'Type product name or batch number...' },
+        initial_value: searchTerm || undefined,
+      },
+      optional: true,
+    },
+    {
+      type: 'actions',
+      elements: [
+        buildButton(':mag: Search', 'ars_search_button', 'search', 'primary'),
+        config.autoReplenishmentEnabled
+          ? buildButton(':x: Deactivate ARS', 'ars_toggle_status', 'deactivate', 'danger')
+          : buildButton(':white_check_mark: Activate ARS', 'ars_toggle_status', 'activate', 'primary'),
+        buildButton(':arrow_left: Back', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
+      ],
+    },
+    buildDivider(),
   ];
-  blocks.push(buildDivider());
-  blocks.push({
-    type: 'input',
-    block_id: 'ars_search_block',
-    label: { type: 'plain_text', text: ':mag: Search Product', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'ars_search_input', placeholder: { type: 'plain_text', text: 'Type product name to find and edit...' }, initial_value: searchTerm || undefined },
-    optional: true,
-  });
-  blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'ars_search_button', 'search', 'primary')] });
-  blocks.push(buildDivider());
 
-  if (filtered.length === 0) {
-    blocks.push(buildSection(searchTerm ? `No products match "${searchTerm}".` : 'No batch stock data available.'));
+  if (!searchTerm) {
+    // No search yet — show compact summary grouped by status
+    const groups: Record<string, string[]> = {};
+    batches.slice(0, 30).forEach((b) => {
+      const key = b.replenishmentStatus || 'OK';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(b.productName);
+    });
+    if (batches.length === 0) {
+      blocks.push(buildSection('No batch stock data available.'));
+    } else {
+      const lines = Object.entries(groups).map(([status, names]) => {
+        const emoji = status === 'Below Min' ? ':red_circle:' : status === 'Warning' ? ':yellow_circle:' : ':green_circle:';
+        return `${emoji} *${status}* (${names.length}): ${names.slice(0, 5).join(', ')}${names.length > 5 ? ` +${names.length - 5} more` : ''}`;
+      });
+      blocks.push(buildSection(lines.join('\n')));
+      if (batches.length > 30) {
+        blocks.push(buildContext([`Showing summary of first 30 of ${batches.length} batches. Search to find specific products.`]));
+      }
+    }
+  } else if (filtered.length === 0) {
+    blocks.push(buildSection(`No products match _"${searchTerm}"_.`));
   } else {
-    const PAGE_SIZE = 28;
-    const visible = filtered.slice(0, PAGE_SIZE);
-    const truncated = filtered.length > PAGE_SIZE;
-    blocks.push(buildSection(`*Products (${visible.length}${truncated ? ` of ${filtered.length}` : ''})*${truncated ? ' — use search to find others' : ''}`));
+    // Show up to 10 search results WITH action buttons
+    const visible = filtered.slice(0, 10);
+    blocks.push(buildSection(`*${visible.length}${filtered.length > 10 ? ` of ${filtered.length}` : ''} result${visible.length !== 1 ? 's' : ''} for "${searchTerm}"*`));
     visible.forEach((b) => {
       const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
       const batchValue = JSON.stringify({ productId: b.productId, productName: b.productName, batchNumber: b.batchNumber, minStock: b.minStock, maxStock: b.maxStock, availableStock: b.availableStock });
-      blocks.push(buildSection(`${emoji} *${b.productName}* (${b.batchNumber})\nStock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
-      blocks.push({ type: 'actions', elements: [
-        buildButton(':pencil2: Edit', `ars_edit_product_${b.productId}`, batchValue),
-        buildButton(':memo: Request Change', `ars_request_change_${b.productId}`, batchValue),
-        buildButton(':x: Deactivate', `ars_deactivate_product_${b.productId}`, batchValue, 'danger'),
-      ]});
+      blocks.push(buildSection(
+        `${emoji} *${b.productName}* (${b.batchNumber})\nStock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`,
+      ));
+      blocks.push({
+        type: 'actions',
+        elements: [
+          buildButton(':pencil2: Edit', `ars_edit_product_${b.productId}`, batchValue),
+          buildButton(':memo: Request Change', `ars_request_change_${b.productId}`, batchValue),
+          buildButton(':x: Deactivate', `ars_deactivate_product_${b.productId}`, batchValue, 'danger'),
+        ],
+      });
     });
+    if (filtered.length > 10) {
+      blocks.push(buildContext([`${filtered.length - 10} more results — refine your search to narrow down.`]));
+    }
   }
 
-  if (triggeredOrders.length > 0) {
-    blocks.push(buildSection(`*Replenishment Orders (${triggeredOrders.length}):*`));
-    triggeredOrders.slice(0, 3).forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* — ${o.productName} | Qty: ${o.quantity} | ${o.reason}\nStock: ${o.currentStock} | Status: ${o.status}`)));
-  }
-  blocks.push({ type: 'actions', elements: [
-    config.autoReplenishmentEnabled
-      ? buildButton(':x: Deactivate ARS', 'ars_toggle_status', 'deactivate', 'danger')
-      : buildButton(':white_check_mark: Activate ARS', 'ars_toggle_status', 'activate', 'primary'),
-    buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
-  ]});
   return blocks;
 }
 
