@@ -19,7 +19,7 @@ import {
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
-  buildARSApprovalMessage, buildARSApprovalAcknowledgement,
+  buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditMode,
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
 import { checkIdempotency, markProcessing, markCompleted, markFailed } from '../../persistence/idempotencyStore';
@@ -84,18 +84,34 @@ export function registerAllActions(
     try {
       const userId = body.user.id;
       const { context: ctx } = await pipeline.resolve(userId);
+
+      let searchTerm = '';
       const stateValues = (body as any).state?.values || {};
-      const searchTerm = (stateValues.product_search_block?.search_products_input?.value || '').toLowerCase();
+      const inputVal = stateValues.product_search_block?.search_products_input?.value;
+      if (inputVal && typeof inputVal === 'string') {
+        searchTerm = inputVal.trim().toLowerCase();
+      }
+
+      logger.info({ userId, searchTerm, hasState: !!Object.keys(stateValues).length }, 'Search triggered');
       const allProducts = await sfClient.getAvailableProducts(ctx);
       const filtered = searchTerm
-        ? allProducts.filter((p) => p.productName.toLowerCase().includes(searchTerm) || (p.productCode || '').toLowerCase().includes(searchTerm))
+        ? allProducts.filter((p) => (p.productName || '').toLowerCase().includes(searchTerm) || (p.productCode || '').toLowerCase().includes(searchTerm))
         : allProducts;
+
       const state = orderBuilders.get(userId) || { selected: [] };
+      state.selected = hydrateSelectedFromSlackState(state.selected, body);
+      orderBuilders.set(userId, state);
+
       const blocks = buildProductSelectionModal(filtered, state.selected);
-      const label = searchTerm ? `Search results for "${searchTerm}"` : 'All products';
-      await safeRespond(body, respond, { text: label, blocks, replace_original: true });
+      const label = searchTerm ? `Search: "${searchTerm}" (${filtered.length} results)` : `All products (${filtered.length})`;
+      if (typeof respond === 'function') {
+        await respond({ text: label, blocks, replace_original: true });
+      } else {
+        await app.client.chat.postEphemeral({ channel: body.channel?.id || userId, user: userId, text: label, blocks });
+      }
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      logger.error({ err }, 'Search failed');
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
   });
@@ -535,60 +551,49 @@ export function registerAllActions(
 
   app.action('ars_menu', async ({ ack, body, respond }) => {
     await ack();
-    const userId = body.user.id;
     try {
-      const { context: ctx } = await pipeline.resolve(userId);
-
-      let config: ArsConfig | null = null;
-      let triggeredOrders: ArsTriggeredOrder[] = [];
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
       let batches: BatchStockPolicy[] = [];
+      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
 
-      try { config = await sfClient.getARSConfig(ctx); } catch { /* BLK-008 */ }
-      try { triggeredOrders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* BLK-008 */ }
-      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail in some orgs */ }
-
-      const resolvedConfig: ArsConfig = config || {
-        autoReplenishmentEnabled: false,
-        activeProducts: { productId: '', productName: 'Not Available (BLK-008)', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
-        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A',
-        lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
+      const resolvedConfig: ArsConfig = {
+        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
 
-      // input blocks are only valid in home tab views, not in message responses (respond/response_url).
-      // Publish directly to the home tab so Slack accepts the block structure.
-      await app.client.views.publish({
-        user_id: userId,
-        view: { type: 'home', blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches) },
-      });
+      const blocks = buildARSDashboard(resolvedConfig, [], batches);
+      await safeRespond(body, respond, { text: 'ARS Dashboard', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
-  // Handles toggle_ars_true and toggle_ars_false generated dynamically in buildARSDashboard
-  app.action(/^toggle_ars_/, async ({ ack, body, respond }) => {
+  app.action('ars_search_button', async ({ ack, body, respond }) => {
     await ack();
-    const userId = body.user.id;
     try {
-      const { context: ctx } = await pipeline.resolve(userId);
-      const actionId = (body as any).actions?.[0]?.action_id as string;
-      const activate = actionId === 'toggle_ars_true';
-      await sfClient.updateARSStatus(ctx, activate);
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).state?.values || {};
+      const searchTerm = (stateValues.ars_search_block?.ars_search_input?.value || '').trim().toLowerCase();
 
-      let config: ArsConfig | null = null;
-      let triggeredOrders: ArsTriggeredOrder[] = [];
       let batches: BatchStockPolicy[] = [];
-      try { config = await sfClient.getARSConfig(ctx); } catch { /* BLK-008 */ }
-      try { triggeredOrders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* BLK-008 */ }
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
 
-      const resolvedConfig: ArsConfig = config || {
-        autoReplenishmentEnabled: activate,
-        activeProducts: { productId: '', productName: 'N/A', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
-        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
+      const resolvedConfig: ArsConfig = {
+        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
-      await app.client.views.publish({
-        user_id: userId,
-        view: { type: 'home', blocks: buildARSDashboard(resolvedConfig, triggeredOrders, batches) },
-      });
+
+      const blocks = buildARSDashboard(resolvedConfig, [], batches, searchTerm);
+      await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('ars_edit_mode', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      let batches: BatchStockPolicy[] = [];
+      try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
+      const blocks = buildARSEditMode(batches);
+      await safeRespond(body, respond, { text: 'Edit ARS Settings', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 

@@ -24,7 +24,13 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
     blocks.push(buildSection(`No orders match "${searchTerm}".`));
   } else {
     filtered.slice(0, 15).forEach((o) => {
-      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | Invoice: ${o.invoiceStatus} | Dispatch: ${o.dispatchStatus}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus}` }, accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details' }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId } });
+      const invEmoji = o.invoiceStatus === 'Invoiced' ? ':receipt:' : o.invoiceStatus === 'Partial' ? ':page_facing_up:' : ':clipboard:';
+      const dispEmoji = o.dispatchStatus === 'Delivered' ? ':truck:' : o.dispatchStatus === 'Pending' ? ':package:' : ':hourglass:';
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'}` },
+        accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details' }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
+      });
       blocks.push(buildDivider());
     });
   }
@@ -79,49 +85,76 @@ export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[
 }
 
 // -- ARS --
-export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTriggeredOrder[], batches: BatchStockPolicy[]): Block[] {
+export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTriggeredOrder[], batches: BatchStockPolicy[], searchTerm = ''): Block[] {
+  const filtered = searchTerm
+    ? batches.filter((b) => b.productName.toLowerCase().includes(searchTerm.toLowerCase()) || b.batchNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+    : batches;
   const blocks: Block[] = [
     buildHeader(':gear: ARS Dashboard'),
-    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Frequency:* ${config.replenishmentFrequency}\n*Thresholds:* Min ${config.minThreshold} / Max ${config.maxThreshold}\n*Last Modified:* ${config.lastModifiedBy} (${config.lastModifiedDate})`),
+    buildSection(`*Status:* ${config.autoReplenishmentEnabled ? ':white_check_mark: Active' : ':x: Inactive'}\n*Frequency:* ${config.replenishmentFrequency}\n*Total Batches:* ${batches.length}${searchTerm ? ` (showing ${filtered.length} matching)` : ''}`),
     buildDivider(),
   ];
-  const toggleLabel = config.autoReplenishmentEnabled ? ':no_entry: Deactivate ARS' : ':white_check_mark: Activate ARS';
-  blocks.push({ type: 'actions', elements: [buildButton(toggleLabel, `toggle_ars_${!config.autoReplenishmentEnabled}`, String(!config.autoReplenishmentEnabled), config.autoReplenishmentEnabled ? 'danger' : 'primary')] });
 
-  if (batches.length > 0) {
-    blocks.push(buildDivider());
-    const editableCount = Math.min(5, batches.length);
-    blocks.push(buildSection(`*Batch-wise Stock (${batches.length} batches, editing first ${editableCount})*`));
-    for (let i = 0; i < editableCount; i++) {
-      const b = batches[i];
+  blocks.push({
+    type: 'input',
+    block_id: 'ars_search_block',
+    label: { type: 'plain_text', text: ':mag: Search Products', emoji: true },
+    element: { type: 'plain_text_input', action_id: 'ars_search_input', placeholder: { type: 'plain_text', text: 'Type product name or batch number...' }, initial_value: searchTerm || undefined },
+    optional: true,
+  });
+  blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'ars_search_button', 'search', 'primary')] });
+  blocks.push(buildDivider());
+
+  if (filtered.length === 0) {
+    blocks.push(buildSection(`No batches match "${searchTerm}".`));
+  } else {
+    blocks.push(buildSection(`*Batch-wise Stock (${filtered.length} batches)*`));
+    filtered.forEach((b) => {
       const emoji = b.replenishmentStatus === 'Below Min' ? ':red_circle:' : b.replenishmentStatus === 'Warning' ? ':yellow_circle:' : ':green_circle:';
-      blocks.push(buildSection(`${emoji} *${b.batchNumber}* — ${b.productName} | Stock: ${b.availableStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
-      blocks.push({
-        type: 'input', block_id: `ars_min_${b.productId}_${i}`,
-        label: { type: 'plain_text', text: `Min for ${b.productName}`.slice(0, 150) },
-        element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}_${i}`, initial_value: String(b.minStock) },
-      });
-      blocks.push({
-        type: 'input', block_id: `ars_max_${b.productId}_${i}`,
-        label: { type: 'plain_text', text: `Max for ${b.productName}`.slice(0, 150) },
-        element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}_${i}`, initial_value: String(b.maxStock) },
-      });
-    }
-    if (batches.length > editableCount) {
-      blocks.push(buildSection(`:information_source: Showing ${editableCount} of ${batches.length} batches. Contact admin to edit more.`));
-    }
-    blocks.push(buildDivider());
-    blocks.push({ type: 'actions', elements: [buildButton(':envelope: Submit ARS Changes for Approval', 'ars_submit_for_approval', 'ars_changes', 'primary')] });
+      blocks.push(buildSection(`${emoji} *${b.batchNumber}* — ${b.productName} | Stock: ${b.availableStock} | Min: ${b.minStock} | Max: ${b.maxStock}${b.expiryDate ? ' | Exp: ' + b.expiryDate : ''}`));
+    });
   }
+
+  blocks.push(buildDivider());
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':pencil2: Edit ARS Settings', 'ars_edit_mode', 'edit', 'primary'),
+    buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
+  ]});
 
   if (triggeredOrders.length > 0) {
     blocks.push(buildDivider());
     blocks.push(buildSection(`*Triggered Replenishment Orders (${triggeredOrders.length}):*`));
     triggeredOrders.slice(0, 3).forEach((o) => blocks.push(buildSection(`*${o.orderNumber}* — ${o.productName} | Qty: ${o.quantity} | ${o.reason}\nStock: ${o.currentStock} (Min: ${o.minThreshold}) | Status: ${o.status}`)));
   }
+  return blocks;
+}
 
+export function buildARSEditMode(batches: BatchStockPolicy[]): Block[] {
+  const editableCount = Math.min(5, batches.length);
+  const blocks: Block[] = [
+    buildHeader(':pencil2: Edit ARS Settings'),
+    buildSection(`Edit min/max quantities for the first ${editableCount} batch(es). Changes require approval in #sales.`),
+    buildDivider(),
+  ];
+  for (let i = 0; i < editableCount; i++) {
+    const b = batches[i];
+    blocks.push(buildSection(`*${b.batchNumber}* — ${b.productName} | Current Stock: ${b.availableStock}`));
+    blocks.push({
+      type: 'input', block_id: `ars_min_${b.productId}_${i}`,
+      label: { type: 'plain_text', text: `Min for ${b.productName}`.slice(0, 150) },
+      element: { type: 'plain_text_input', action_id: `ars_input_min_${b.productId}_${i}`, initial_value: String(b.minStock) },
+    });
+    blocks.push({
+      type: 'input', block_id: `ars_max_${b.productId}_${i}`,
+      label: { type: 'plain_text', text: `Max for ${b.productName}`.slice(0, 150) },
+      element: { type: 'plain_text_input', action_id: `ars_input_max_${b.productId}_${i}`, initial_value: String(b.maxStock) },
+    });
+  }
   blocks.push(buildDivider());
-  blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':envelope: Submit ARS Changes for Approval', 'ars_submit_for_approval', 'ars_changes', 'primary'),
+    buildButton(':arrow_left: Back to ARS Dashboard', 'ars_menu', 'back'),
+  ]});
   return blocks;
 }
 
