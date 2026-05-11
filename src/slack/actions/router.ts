@@ -86,7 +86,7 @@ export function registerAllActions(
       const { context: ctx } = await pipeline.resolve(userId);
 
       let searchTerm = '';
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const inputVal = stateValues.product_search_block?.search_products_input?.value;
       if (inputVal && typeof inputVal === 'string') {
         searchTerm = inputVal.trim().toLowerCase();
@@ -209,7 +209,7 @@ export function registerAllActions(
         await safeRespond(body, respond, { text: 'No quote available. Please rebuild your order.', replace_original: false });
         return;
       }
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const selectedCreditNoteIds = (stateValues.credit_notes?.select_credit_notes?.selected_options || [])
         .map((option: any) => option.value)
         .filter((value: unknown): value is string => typeof value === 'string');
@@ -768,7 +768,7 @@ function hydrateSelectedFromSlackState(
   selected: Array<{ productId: string; quantity: number; schemeDiscount?: number }>,
   body: any,
 ) {
-  const stateValues = body?.state?.values || {};
+  const stateValues = body?.view?.state?.values || body?.state?.values || {};
   return selected.map((item) => {
     const qtyValue = stateValues[`qty_${item.productId}`]?.[`input_qty_${item.productId}`]?.value;
     const quantity = Math.max(1, parseInt(qtyValue || String(item.quantity), 10) || item.quantity || 1);
