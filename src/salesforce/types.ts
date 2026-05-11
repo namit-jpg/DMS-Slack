@@ -227,8 +227,8 @@ export interface DMSProduct {
   unitPrice: number;
   packSize: number;
   isActive: boolean;
-  minOrderQtyPrimary: number;
-  minOrderQtySecondary: number;
+  minOrderQtyPrimary: number | null;
+  minOrderQtySecondary: number | null;
 }
 
 export interface PrimaryOrder {

@@ -145,7 +145,7 @@ export function buildInvoicesByAccountQuery(accountId: string): string {
 
 export function buildProductsQuery(ids?: string[]): string {
   const P = SALESFORCE_FIELD_MAP.PRODUCT;
-  const fields = `${P.ID}, ${P.NAME}, ${P.PRODUCT_CODE}, ${P.FAMILY}, ${P.IS_ACTIVE}, ${P.UNIT_OF_MEASURE}, ${P.UNIT_PRICE}, ${P.PACK_SIZE}, ${P.PRODUCT_CATEGORY}`;
+  const fields = `${P.ID}, ${P.NAME}, ${P.PRODUCT_CODE}, ${P.FAMILY}, ${P.IS_ACTIVE}, ${P.UNIT_OF_MEASURE}, ${P.UNIT_PRICE}, ${P.PACK_SIZE}, ${P.PRODUCT_CATEGORY}, ${P.MIN_ORDER_QTY_PRIMARY}, ${P.MIN_ORDER_QTY_SECONDARY}`;
 
   if (ids && ids.length > 0) {
     const escapedIds = ids

@@ -39,7 +39,7 @@ export function buildProductSelectionModal(
   products.slice(0, 10).forEach((p) => {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*${p.productName}* (${p.productCode})\n${p.family} | Unit: ${p.unitOfMeasure} | Rs ${p.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}/unit | Min Qty: ${p.minOrderQtyPrimary}` },
+      text: { type: 'mrkdwn', text: `*${p.productName}* (${p.productCode})\n${p.family} | Unit: ${p.unitOfMeasure} | Rs ${p.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}/unit | Min Qty: ${p.minOrderQtyPrimary ?? 'No minimum'}` },
       accessory: { type: 'button', text: { type: 'plain_text', text: 'Add', emoji: true }, action_id: `add_product_${p.productId}`, value: p.productId },
     });
     blocks.push(buildDivider());

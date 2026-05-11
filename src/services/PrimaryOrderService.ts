@@ -219,8 +219,8 @@ export class PrimaryOrderService {
         unitPrice: r.Unit_Price__c || 0,
         packSize: r.Pack_Size__c || 0,
         isActive: r.IsActive,
-        minOrderQtyPrimary: r.Minimum_Order_Quantity_Primary__c || 0,
-        minOrderQtySecondary: r.Minimum_Order_Quantity_Secondary__c || 0,
+        minOrderQtyPrimary: r.Minimum_Order_Quantity_Primary__c ?? null,
+        minOrderQtySecondary: r.Minimum_Order_Quantity_Secondary__c ?? null,
       }));
     } catch {
       return ids.map((id) => ({
@@ -233,8 +233,8 @@ export class PrimaryOrderService {
         unitPrice: 0,
         packSize: 0,
         isActive: true,
-        minOrderQtyPrimary: 0,
-        minOrderQtySecondary: 0,
+        minOrderQtyPrimary: null,
+        minOrderQtySecondary: null,
       }));
     }
   }

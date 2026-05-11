@@ -458,8 +458,8 @@ export class SalesforceRestClient implements ISalesforceClient {
         family: r.Product2.Family, category: r.Product2.Product_Category__c,
         unitOfMeasure: r.Product2.Unit_Of_Measure__c || 'Each', unitPrice: r.UnitPrice || 0,
         packSize: r.Product2.Pack_Size__c || 0, isActive: r.Product2.IsActive,
-        minOrderQtyPrimary: r.Product2.Minimum_Order_Quantity_Primary__c || 0,
-        minOrderQtySecondary: r.Product2.Minimum_Order_Quantity_Secondary__c || 0,
+        minOrderQtyPrimary: r.Product2.Minimum_Order_Quantity_Primary__c ?? null,
+        minOrderQtySecondary: r.Product2.Minimum_Order_Quantity_Secondary__c ?? null,
       }));
     } catch (err) {
       log.error({ err }, 'Failed to fetch products');
@@ -874,8 +874,21 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<SecondaryOrder[]> {
     try {
       const escapedId = escapeSoql(context.salesforceAccountId);
-      return (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(`SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`, correlationId)).records.map((r) => ({
-        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId, retailerCustomer: r.Retailer_Account__r?.Name || r.Retailer_Account__c || '', status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
+      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(`SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`, correlationId)).records;
+      // Batch-resolve any missing retailer names via Account query
+      const missingIds = [...new Set(records.filter((r) => !r.Retailer_Account__r?.Name && r.Retailer_Account__c).map((r) => r.Retailer_Account__c as string))];
+      const nameMap = new Map<string, string>();
+      if (missingIds.length > 0) {
+        try {
+          const idList = missingIds.map((id) => `'${escapeSoql(id)}'`).join(',');
+          const accountResult = await this.query<{ Id: string; Name: string }>(`SELECT Id, Name FROM Account WHERE Id IN (${idList})`, correlationId);
+          accountResult.records.forEach((a) => nameMap.set(a.Id, a.Name));
+        } catch { /* best effort */ }
+      }
+      return records.map((r) => ({
+        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
+        retailerCustomer: r.Retailer_Account__r?.Name || nameMap.get(r.Retailer_Account__c || '') || r.Retailer_Account__c || 'Unknown Retailer',
+        status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
         fulfillmentStatus: r.Status, invoiceStatus: '', dispatchStatus: '', orderDate: r.EffectiveDate || '', items: [], type: r.Type,
       }));
     } catch { throw new SalesforceError('Failed to fetch secondary orders', { userMessage: 'Unable to load secondary orders.' }); }
@@ -911,7 +924,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       orderId: r.Id,
       orderNumber: r.OrderNumber,
       distributorId: r.AccountId,
-      retailerCustomer: r.Retailer_Account__r?.Name || r.Retailer_Account__c || '',
+      retailerCustomer: r.Retailer_Account__r?.Name || (r.Retailer_Account__c ? await this.query<{ Id: string; Name: string }>(`SELECT Id, Name FROM Account WHERE Id = '${escapeSoql(r.Retailer_Account__c)}'`, correlationId).then((res) => res.records[0]?.Name || 'Unknown Retailer').catch(() => 'Unknown Retailer') : 'Unknown Retailer'),
       status: r.Status,
       totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
       fulfillmentStatus: r.Status,
@@ -979,7 +992,24 @@ export class SalesforceRestClient implements ISalesforceClient {
       lastModifiedDate: row?.SystemModstamp || '',
     };
   }
-  async updateARSStatus(): Promise<ArsConfig> { throw new SalesforceError('ARS settings are read-only from Slack.', { userMessage: 'ARS settings are available as a read-only dashboard. Updates require Salesforce metadata/API support.' }); }
+  async updateARSStatus(context: ResolvedDistributorContext, active: boolean, correlationId?: string): Promise<ArsConfig> {
+    try {
+      const escapedId = escapeSoql(context.salesforceAccountId);
+      const batches = await this.query<{ Id: string; Status__c: string }>(
+        `SELECT Id, Status__c FROM Inventory_Batch__c WHERE Distributor__c = '${escapedId}'`,
+        correlationId,
+      );
+      const newStatus = active ? 'Active' : 'Inactive';
+      for (const batch of batches.records) {
+        if (batch.Status__c !== newStatus) {
+          await this.update('Inventory_Batch__c', batch.Id, { Status__c: newStatus }, correlationId);
+        }
+      }
+      return this.getARSConfig(context, correlationId);
+    } catch (err) {
+      throw new SalesforceError('Failed to update ARS status', { userMessage: 'Unable to update ARS status. Please try again.' });
+    }
+  }
   async getBatchWiseStockPolicies(context: ResolvedDistributorContext): Promise<BatchStockPolicy[]> {
     try {
       const escapedId = context.salesforceAccountId.replace(/'/g, "\\'");
