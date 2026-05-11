@@ -874,8 +874,8 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<SecondaryOrder[]> {
     try {
       const escapedId = escapeSoql(context.salesforceAccountId);
-      return (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(`SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`, correlationId)).records.map((r) => ({
-        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId, retailerCustomer: r.Retailer_Account__c || '', status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
+      return (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(`SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`, correlationId)).records.map((r) => ({
+        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId, retailerCustomer: r.Retailer_Account__r?.Name || r.Retailer_Account__c || '', status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
         fulfillmentStatus: r.Status, invoiceStatus: '', dispatchStatus: '', orderDate: r.EffectiveDate || '', items: [], type: r.Type,
       }));
     } catch { throw new SalesforceError('Failed to fetch secondary orders', { userMessage: 'Unable to load secondary orders.' }); }
@@ -884,8 +884,8 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrderDetails(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderDetail> {
     const escapedId = escapeSoql(secondaryOrderId);
     const escapedAccountId = escapeSoql(context.salesforceAccountId);
-    const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
-      `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
+    const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
+      `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
       correlationId,
     );
     if (result.records.length === 0) {
@@ -911,7 +911,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       orderId: r.Id,
       orderNumber: r.OrderNumber,
       distributorId: r.AccountId,
-      retailerCustomer: r.Retailer_Account__c || '',
+      retailerCustomer: r.Retailer_Account__r?.Name || r.Retailer_Account__c || '',
       status: r.Status,
       totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
       fulfillmentStatus: r.Status,

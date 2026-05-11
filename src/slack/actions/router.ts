@@ -19,7 +19,7 @@ import {
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
-  buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditProduct,
+  buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditProduct, buildARSChangeRequestForm,
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
 import { checkIdempotency, markProcessing, markCompleted, markFailed } from '../../persistence/idempotencyStore';
@@ -95,7 +95,11 @@ export function registerAllActions(
       logger.info({ userId, searchTerm, hasState: !!Object.keys(stateValues).length }, 'Search triggered');
       const allProducts = await sfClient.getAvailableProducts(ctx);
       const filtered = searchTerm
-        ? allProducts.filter((p) => (p.productName || '').toLowerCase().includes(searchTerm) || (p.productCode || '').toLowerCase().includes(searchTerm))
+        ? allProducts.filter((p) =>
+            (p.productName || '').toLowerCase().includes(searchTerm) ||
+            (p.productCode || '').toLowerCase().includes(searchTerm) ||
+            (p.family || '').toLowerCase().includes(searchTerm) ||
+            (p.category || '').toLowerCase().includes(searchTerm))
         : allProducts;
 
       const state = orderBuilders.get(userId) || { selected: [] };
@@ -568,7 +572,7 @@ export function registerAllActions(
     await ack();
     try {
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const searchTerm = (stateValues.ars_search_block?.ars_search_input?.value || '').trim().toLowerCase();
       let batches: BatchStockPolicy[] = [];
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
@@ -598,7 +602,7 @@ export function registerAllActions(
       const userId = body.user.id;
       const { identity, context: ctx } = await pipeline.resolve(userId);
       const productId = (action as any).action_id.replace('ars_submit_product_', '');
-      const stateValues = (body as any).state?.values || {};
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const newMinVal = stateValues.ars_edit_min?.ars_edit_min_val?.value;
       const newMaxVal = stateValues.ars_edit_max?.ars_edit_max_val?.value;
       const value = (action as any).value || '{}';
@@ -631,23 +635,65 @@ export function registerAllActions(
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
-  app.action('ars_search_button', async ({ ack, body, respond }) => {
+  app.action('ars_toggle_status', async ({ ack, body, respond, action }) => {
     await ack();
     try {
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const stateValues = (body as any).state?.values || {};
-      const searchTerm = (stateValues.ars_search_block?.ars_search_input?.value || '').trim().toLowerCase();
-
+      const activate = (action as any).value === 'activate';
+      await sfClient.updateARSStatus(ctx, activate);
       let batches: BatchStockPolicy[] = [];
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-
-      const resolvedConfig: ArsConfig = {
-        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
+      const config: ArsConfig = {
+        autoReplenishmentEnabled: activate, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
         minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
+      const blocks = buildARSDashboard(config, [], batches);
+      await safeRespond(body, respond, { text: `ARS ${activate ? 'activated' : 'deactivated'}`, blocks, replace_original: true });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
 
-      const blocks = buildARSDashboard(resolvedConfig, [], batches, searchTerm);
-      await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
+  app.action(/^ars_request_change_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const value = (action as any).value || '{}';
+      const info = typeof value === 'string' ? JSON.parse(value) : value;
+      const blocks = buildARSChangeRequestForm(info);
+      await safeRespond(body, respond, { text: `Request ARS Change — ${info.productName}`, blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^ars_submit_change_request_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { identity, context: ctx } = await pipeline.resolve(userId);
+      const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
+      const reason = stateValues.ars_cr_reason?.ars_cr_reason_val?.value || 'No reason provided';
+      const newMinVal = stateValues.ars_cr_new_min?.ars_cr_new_min_val?.value;
+      const newMaxVal = stateValues.ars_cr_new_max?.ars_cr_new_max_val?.value;
+      const value = (action as any).value || '{}';
+      const info = typeof value === 'string' ? JSON.parse(value) : value;
+      const newMin = newMinVal ? (parseInt(newMinVal, 10) || info.minStock) : info.minStock;
+      const newMax = newMaxVal ? (parseInt(newMaxVal, 10) || info.maxStock) : info.maxStock;
+      try {
+        await app.client.chat.postMessage({
+          channel: 'sales',
+          text: `ARS Change Request from ${identity.displayName}: ${info.productName}`,
+          blocks: buildARSApprovalMessage(identity.displayName, ctx.accountName, [{ productName: info.productName, oldMin: info.minStock, newMin, oldMax: info.maxStock, newMax }]),
+        });
+        await safeRespond(body, respond, { text: `:white_check_mark: Change request for ${info.productName} submitted to #sales.\n*Reason:* ${reason}`, replace_original: false });
+      } catch {
+        await safeRespond(body, respond, { text: ':warning: Could not send to #sales channel. Please contact your admin.', replace_original: false });
+      }
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^ars_deactivate_product_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const value = (action as any).value || '{}';
+      const info = typeof value === 'string' ? JSON.parse(value) : value;
+      await safeRespond(body, respond, { text: `:x: ARS deactivated for *${info.productName}*. Contact your admin to re-enable.`, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
