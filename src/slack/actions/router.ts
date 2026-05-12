@@ -354,6 +354,41 @@ export function registerAllActions(
     }
   });
 
+  app.action('returns_menu', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const returns = await sfClient.getReturnOrders(ctx);
+      const blocks = buildReturnOrderListBlocks(returns);
+      await safeRespond(body, respond, { text: 'Returns', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('claims_menu', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const claims = await sfClient.getClaims(ctx);
+      const blocks: any[] = [buildHeader(':memo: Claims'), buildSection(claims.length + ' claims found.'), buildDivider()];
+      claims.slice(0, 10).forEach((c: any) => blocks.push(buildSection('*' + c.claimNumber + '* — ' + c.claimType + '\nStatus: ' + c.status + ' | Amount: Rs ' + (c.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }))));
+      blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
+      await safeRespond(body, respond, { text: 'Claims', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('bulk_secondary_invoice', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const orders = await sfClient.getSecondaryOrders(ctx);
+      const pending = orders.filter((o: any) => o.invoiceStatus !== 'Invoiced');
+      await safeRespond(body, respond, { text: 'Bulk Secondary Invoice', blocks: buildSecondaryOrderList(pending), replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
   app.action('returns_claims_menu', async ({ ack, body, respond }) => {
     await ack();
     try {
