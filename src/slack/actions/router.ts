@@ -21,6 +21,7 @@ import {
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
+  buildARSOrdersList, buildEnhancedInventoryView,
   buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditProduct, buildARSChangeRequestForm,
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
@@ -610,30 +611,14 @@ export function registerAllActions(
     await ack();
     try {
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const batches = await sfClient.getBatchWiseStockPolicies(ctx);
-      const byProduct = new Map<string, { productName: string; totalStock: number; batches: BatchStockPolicy[] }>();
-      for (const b of batches) {
-        const entry = byProduct.get(b.productId) || { productName: b.productName, totalStock: 0, batches: [] };
-        entry.totalStock += b.availableStock;
-        entry.batches.push(b);
-        byProduct.set(b.productId, entry);
-      }
-      const blocks: any[] = [buildHeader(':package: Inventory Visibility'), buildDivider()];
-      if (byProduct.size === 0) {
-        blocks.push(buildSection('No inventory data available.'));
-      } else {
-        blocks.push(buildSection(`*Product-wise Available Stock (${byProduct.size} products)*`));
-        for (const [id, entry] of byProduct) {
-          const lowStock = entry.totalStock < 20;
-          const emoji = lowStock ? ':warning:' : ':green_circle:';
-          blocks.push(buildSection(`${emoji} *${entry.productName}*\nTotal Stock: ${entry.totalStock}${lowStock ? ' (Low!)' : ''} | Batches: ${entry.batches.length}`));
-          if (lowStock) {
-            blocks.push({ type: 'actions', elements: [buildButton(':shopping_trolley: Place Replenishment Order', `replenish_order_${id}`, id, 'primary')] });
-          }
-          blocks.push(buildDivider());
-        }
-      }
-      blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
+      const batchData = await sfClient.getBatchWiseStockPolicies(ctx);
+      const products = batchData.map((b) => ({
+        productId: b.productId, productName: b.productName,
+        currentStock: b.availableStock, minStock: b.minStock, maxStock: b.maxStock,
+        expectedStock: Math.round(b.availableStock * 1.2),
+        location: b.batchNumber || 'Default',
+      }));
+      const blocks = buildEnhancedInventoryView(products);
       await safeRespond(body, respond, { text: 'Inventory Visibility', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -688,7 +673,7 @@ export function registerAllActions(
         autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
         minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
-      const blocks = buildARSDashboard(resolvedConfig, [], batches);
+      const blocks = buildARSDashboard(resolvedConfig, batches);
       await safeRespond(body, respond, { text: 'ARS Dashboard', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -705,7 +690,7 @@ export function registerAllActions(
         autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
         minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
-      const blocks = buildARSDashboard(resolvedConfig, [], batches, searchTerm);
+      const blocks = buildARSDashboard(resolvedConfig, batches, searchTerm);
       await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -787,7 +772,7 @@ export function registerAllActions(
         autoReplenishmentEnabled: activate, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
         minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
       };
-      const blocks = buildARSDashboard(config, [], batches);
+      const blocks = buildARSDashboard(config, batches);
       await safeRespond(body, respond, { text: `ARS ${activate ? 'activated' : 'deactivated'}`, blocks, replace_original: true });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -834,6 +819,49 @@ export function registerAllActions(
         } catch { /* DM may also fail — messages_tab_disabled */ }
         await safeRespond(body, respond, { text: `:white_check_mark: Change request recorded for ${info.productName}. Could not deliver to #${salesChannelRaw}. Reason: ${reason}`, replace_original: false });
       }
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('ars_view_orders', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      let orders: ArsTriggeredOrder[] = [];
+      try { orders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* may fail */ }
+      const blocks = buildARSOrdersList(orders);
+      await safeRespond(body, respond, { text: 'ARS Orders', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^ars_create_order_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      await pipeline.resolve(userId);
+      const productId = (action as any).action_id.replace('ars_create_order_', '');
+      orderBuilders.set(userId, { selected: [{ productId, quantity: 1 }] });
+      const ctx = await pipeline.resolve(userId).then((r) => r.context);
+      const products = await sfClient.getAvailableProducts(ctx);
+      const blocks = buildProductSelectionModal(products, [{ productId, quantity: 1 }]);
+      await safeRespond(body, respond, { text: 'Create Primary Order', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('inventory_select_location', async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const selectedLocation = (action as any).selected_option?.value;
+      const batchData = await sfClient.getBatchWiseStockPolicies(ctx);
+      const products = batchData.map((b) => ({
+        productId: b.productId, productName: b.productName,
+        currentStock: b.availableStock, minStock: b.minStock, maxStock: b.maxStock,
+        expectedStock: Math.round(b.availableStock * 1.2),
+        location: b.batchNumber || 'Default',
+      }));
+      const effectiveLocation = selectedLocation === '__all__' ? undefined : selectedLocation;
+      const blocks = buildEnhancedInventoryView(products, effectiveLocation);
+      await safeRespond(body, respond, { text: 'Inventory Visibility', blocks, replace_original: true });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
