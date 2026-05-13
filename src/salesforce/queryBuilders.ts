@@ -13,6 +13,7 @@ export function buildDistributorQuery(email: string): string {
     SELECT ${F.ID}, ${F.EMAIL}, ${F.FIRST_NAME}, ${F.LAST_NAME}, ${F.DISTRIBUTOR}
     FROM Contact
     WHERE ${F.EMAIL} = '${escapedEmail}'
+    AND ${F.DISTRIBUTOR} != null
     LIMIT 1
   `
     .replace(/\n/g, ' ')
