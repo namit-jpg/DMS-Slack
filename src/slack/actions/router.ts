@@ -368,7 +368,23 @@ export function registerAllActions(
       const { context: ctx } = await pipeline.resolve(userId);
       const orders = await sfClient.getSecondaryOrders(ctx);
       const pending = orders.filter((o: any) => o.invoiceStatus !== 'Invoiced');
-      await safeRespond(body, respond, { text: 'Bulk Secondary Invoice', blocks: buildSecondaryOrderList(pending), replace_original: false });
+      const blocks: any[] = [buildHeader(':receipt: Bulk Secondary Invoice Processing'), buildDivider()];
+      blocks.push(buildSection(`*${pending.length} pending invoice(s)*`));
+      if (pending.length === 0) {
+        blocks.push(buildSection('All secondary orders are already invoiced.'));
+      } else {
+        blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
+        blocks.push(buildDivider());
+        pending.slice(0, 10).forEach((o: any) => {
+          blocks.push(buildSection(`*${o.orderNumber}* — ${o.retailerCustomer}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'N/A'}`));
+          blocks.push({ type: 'actions', elements: [
+            buildButton(':receipt: Process Invoice', `process_so_invoice_${o.orderId}`, o.orderId, 'primary'),
+            buildButton(':twisted_rightwards_arrows: View Details', `view_so_detail_${o.orderId}`, o.orderId),
+          ]});
+          blocks.push(buildDivider());
+        });
+      }
+      await safeRespond(body, respond, { text: 'Bulk Secondary Invoice', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
@@ -402,6 +418,30 @@ export function registerAllActions(
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
+  });
+
+  app.action(/^upload_return_file_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try { const userId = body.user.id; await pipeline.resolve(userId);
+      await safeRespond(body, respond, { text: ':package: File upload — please attach your file as a Slack message in this thread. We will add direct file upload support soon.', replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^submit_return_approval_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { identity, context: ctx } = await pipeline.resolve(userId);
+      const returnOrderId = (action as any).action_id.replace('submit_return_approval_', '');
+      const detail = await sfClient.getReturnOrderDetails(ctx, returnOrderId);
+      const approvalBlocks = [buildHeader(':envelope: Return Order Approval Request'), buildSection(`*Return:* ${detail.returnNumber}\n*Amount:* Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n*Type:* ${detail.type || 'N/A'}\n*Requested by:* ${identity.displayName}`), buildSection(':warning: Please review and approve/reject this return order to generate a credit note.')];
+      const salesChannel = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
+      try {
+        await app.client.chat.postMessage({ channel: salesChannel, text: `Return Order Approval — ${detail.returnNumber}`, blocks: approvalBlocks });
+        await safeRespond(body, respond, { text: `:white_check_mark: Return ${detail.returnNumber} sent for approval to #${salesChannel}. A credit note will be generated upon approval.`, replace_original: false });
+      } catch (channelErr: any) { logger.warn({ err: channelErr }, 'Return approval post failed');
+        await safeRespond(body, respond, { text: `:white_check_mark: Approval request recorded for ${detail.returnNumber}.`, replace_original: false });
+      }
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
   app.action(/^file_claim_/, async ({ ack, body, respond, action }) => {

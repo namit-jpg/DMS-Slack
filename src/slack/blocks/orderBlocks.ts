@@ -122,6 +122,11 @@ export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): B
     : orders;
   if (orders.length === 0) return [buildHeader(':clipboard: My Primary Orders'), buildSection('No orders found.'), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
   const blocks: Block[] = [buildHeader(':clipboard: My Primary Orders'), buildDivider()];
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':pencil: New Order', SLACK_ACTION_IDS.SELECT_ORDER_TYPE, 'create', 'primary'),
+    buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
+  ]});
+  blocks.push(buildDivider());
   blocks.push({
     type: 'input',
     block_id: 'order_search_block',
