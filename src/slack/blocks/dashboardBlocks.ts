@@ -68,6 +68,13 @@ export function buildDashboardView(
     {
       type: 'actions' as const,
       elements: [
+        buildButton(':package: Inventory Visibility', 'view_inventory', 'inventory'),
+        buildButton(':page_facing_up: Partially Fulfilled', 'view_partial_orders', 'partial'),
+      ],
+    },
+    {
+      type: 'actions' as const,
+      elements: [
         buildButton(':bar_chart: Business Insights', 'insights_menu', 'insights'),
         buildButton(':gear: ARS Settings', 'ars_menu', 'ars'),
         buildButton(':arrows_counterclockwise: Refresh', 'refresh_insights', 'refresh'),

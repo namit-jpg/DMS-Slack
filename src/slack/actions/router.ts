@@ -560,6 +560,22 @@ export function registerAllActions(
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
       const orderId = (action as any).action_id.replace('process_so_invoice_', '');
       const availability = await sfClient.getInventoryAvailability(ctx, orderId);
+      const hasAnyStock = availability.some((a) => a.availableQuantity > 0);
+
+      if (!hasAnyStock) {
+        await safeRespond(body, respond, {
+          text: 'No Stock Available',
+          blocks: [
+            buildHeader(':x: Cannot Process Invoice'),
+            buildSection('No stock is available for any product in this order. Invoice processing is blocked.'),
+            buildDivider(),
+            ...buildSecondaryOrderDetail(await sfClient.getSecondaryOrderDetails(ctx, orderId)),
+          ],
+          replace_original: false,
+        });
+        return;
+      }
+
       await safeRespond(body, respond, { text: 'Process Invoice', blocks: buildInvoiceProcessing(orderId, availability), replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
@@ -587,6 +603,78 @@ export function registerAllActions(
       if (dispatches.length === 0) { await safeRespond(body, respond, { text: 'No dispatch requests found for this order.' }); return; }
       const updated = await sfClient.updateDispatchStatus(ctx, dispatches[0].dispatchId, 'Delivered');
       await safeRespond(body, respond, { text: 'Dispatch Updated', blocks: [buildHeader(':white_check_mark: Delivery Confirmed'), buildSection(`Dispatch *${updated.dispatchName}* marked as *Delivered*.`)] });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('view_inventory', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const batches = await sfClient.getBatchWiseStockPolicies(ctx);
+      const byProduct = new Map<string, { productName: string; totalStock: number; batches: BatchStockPolicy[] }>();
+      for (const b of batches) {
+        const entry = byProduct.get(b.productId) || { productName: b.productName, totalStock: 0, batches: [] };
+        entry.totalStock += b.availableStock;
+        entry.batches.push(b);
+        byProduct.set(b.productId, entry);
+      }
+      const blocks: any[] = [buildHeader(':package: Inventory Visibility'), buildDivider()];
+      if (byProduct.size === 0) {
+        blocks.push(buildSection('No inventory data available.'));
+      } else {
+        blocks.push(buildSection(`*Product-wise Available Stock (${byProduct.size} products)*`));
+        for (const [id, entry] of byProduct) {
+          const lowStock = entry.totalStock < 20;
+          const emoji = lowStock ? ':warning:' : ':green_circle:';
+          blocks.push(buildSection(`${emoji} *${entry.productName}*\nTotal Stock: ${entry.totalStock}${lowStock ? ' (Low!)' : ''} | Batches: ${entry.batches.length}`));
+          if (lowStock) {
+            blocks.push({ type: 'actions', elements: [buildButton(':shopping_cart: Place Replenishment Order', `replenish_order_${id}`, id, 'primary')] });
+          }
+          blocks.push(buildDivider());
+        }
+      }
+      blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
+      await safeRespond(body, respond, { text: 'Inventory Visibility', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action(/^replenish_order_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const productId = (action as any).action_id.replace('replenish_order_', '');
+      const products = await sfClient.getAvailableProducts(ctx);
+      const product = products.find((p) => p.productId === productId);
+      const blocks: any[] = [
+        buildHeader(':shopping_cart: Replenishment Order'),
+        buildSection(`Create a primary order for *${product?.productName || productId}* to replenish low stock.`),
+        buildDivider(),
+        buildSection('Click "Create Primary Order" and add this product with your desired quantity.'),
+        { type: 'actions', elements: [buildButton(':pencil: Create Primary Order', SLACK_ACTION_IDS.SELECT_ORDER_TYPE, 'create', 'primary'), buildButton(':arrow_left: Back to Inventory', 'view_inventory', 'back')] },
+      ];
+      await safeRespond(body, respond, { text: 'Replenishment Order', blocks, replace_original: false });
+    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+  });
+
+  app.action('view_partial_orders', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const orders = await sfClient.getSecondaryOrders(ctx);
+      const partial = orders.filter((o: any) => o.fulfillmentStatus === 'Partially Fulfilled' || o.invoiceStatus === 'Partial');
+      const blocks: any[] = [buildHeader(':page_facing_up: Partially Fulfilled Orders'), buildDivider()];
+      if (partial.length === 0) {
+        blocks.push(buildSection('No partially fulfilled orders found.'));
+      } else {
+        blocks.push(buildSection(`${partial.length} partially fulfilled order(s):`));
+        partial.forEach((o: any) => {
+          blocks.push(buildSection(`*${o.orderNumber}* — ${o.retailerCustomer}\nStatus: ${o.status} | Invoice: ${o.invoiceStatus || 'N/A'} | Fulfillment: ${o.fulfillmentStatus || 'N/A'}`));
+          blocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice', `process_so_invoice_${o.orderId}`, o.orderId, 'primary')] });
+          blocks.push(buildDivider());
+        });
+      }
+      blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
+      await safeRespond(body, respond, { text: 'Partially Fulfilled Orders', blocks, replace_original: false });
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
 
