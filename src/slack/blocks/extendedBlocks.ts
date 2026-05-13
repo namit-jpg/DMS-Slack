@@ -197,7 +197,7 @@ export function buildARSEditProduct(productInfo: { productId: string; productNam
     },
     buildDivider(),
     { type: 'actions', elements: [
-      buildButton(':envelope: Submit for Approval', `ars_submit_product_${productInfo.productId}`, productInfo.productId, 'primary'),
+      buildButton(':envelope: Submit for Approval', `ars_submit_product_${productInfo.productId}`, JSON.stringify(productInfo), 'primary'),
       buildButton(':arrow_left: Back to ARS', 'ars_menu', 'back'),
     ]},
   ];
