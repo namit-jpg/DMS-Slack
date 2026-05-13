@@ -53,12 +53,14 @@ async function main() {
     },
     async (ctx, order) => {
       logger.info({ orderId: order.orderId, accountId: ctx.salesforceAccountId }, 'New secondary order notification');
+      const partialNote = order.fulfillmentStatus === 'Partially Fulfilled' || order.invoiceStatus === 'Partial' ? ' :warning: *PARTIAL*' : '';
       try {
+        const salesChannel = process.env.SLACK_SALES_CHANNEL || 'sales';
         await app.client.chat.postMessage({
-          channel: ctx.slackUserId,
-          text: `:twisted_rightwards_arrows: New Secondary Order: *${order.orderNumber}*\nRetailer: ${order.retailerCustomer}\nAmount: Rs ${order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nStatus: ${order.status}`,
+          channel: salesChannel,
+          text: `:twisted_rightwards_arrows: New Secondary Order: *${order.orderNumber}*${partialNote}\nRetailer: ${order.retailerCustomer}\nAmount: Rs ${order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nStatus: ${order.status} | Invoice: ${order.invoiceStatus || 'N/A'} | Fulfillment: ${order.fulfillmentStatus || 'N/A'}`,
         });
-      } catch { logger.warn('Could not deliver secondary order notification via DM'); }
+      } catch { logger.warn('Could not deliver secondary order notification to #sales'); }
     },
   );
 

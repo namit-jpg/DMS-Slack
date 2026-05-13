@@ -13,7 +13,7 @@
     },
     "slash_commands": [
       {
-        "command": "/wd-dms",
+        "command": "/dms",
         "description": "Open DMS/SFA dashboard",
         "should_escape": false
       }
@@ -27,7 +27,9 @@
         "users:read",
         "users:read.email",
         "im:write",
-        "files:read"
+        "files:read",
+        "channels:read",
+        "channels:join"
       ]
     }
   },

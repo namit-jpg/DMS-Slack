@@ -133,6 +133,7 @@ export function buildConfirmationDialog(
     title: {
       type: 'plain_text' as const,
       text: title,
+      emoji: true,
     },
     text: {
       type: 'mrkdwn' as const,
@@ -141,10 +142,12 @@ export function buildConfirmationDialog(
     confirm: {
       type: 'plain_text' as const,
       text: confirm,
+      emoji: true,
     },
     deny: {
       type: 'plain_text' as const,
       text: deny,
+      emoji: true,
     },
   };
 }
@@ -175,7 +178,11 @@ export function buildMainMenuBlocks(userName: string): Block[] {
     ),
     buildActions(
       buildButton(':twisted_rightwards_arrows: Secondary Orders', 'secondary_orders_menu', 'secondary'),
-      buildButton(':leftwards_arrow_with_hook: Returns & Claims', 'returns_claims_menu', 'returns'),
+      buildButton(':receipt: Bulk Secondary Invoice', 'bulk_secondary_invoice', 'bulk_invoice'),
+    ),
+    buildActions(
+      buildButton(':leftwards_arrow_with_hook: Returns', 'returns_menu', 'returns'),
+      buildButton(':memo: Claims', 'claims_menu', 'claims'),
     ),
     buildActions(
       buildButton(':bar_chart: Business Insights', 'insights_menu', 'insights'),

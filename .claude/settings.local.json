@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud logging *)",
+      "Bash(gcloud compute *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(git commit -m 'fix: ARS 100-block limit and respond is not a function in approval handlers *)",
+      "Bash(git commit -m 'fix: ARS search-first layout \\(never exceeds 100 blocks\\) + Business Insights charts *)",
+      "Bash(npx sf *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); r=d.get\\('result',{}\\); print\\('instanceUrl:', r.get\\('instanceUrl',''\\)\\); print\\('accessToken:', r.get\\('accessToken',''\\)[:20]+'...'\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(npm test *)",
+      "Bash(gcloud config *)",
+      "Bash(gh pr *)"
+    ]
+  }
+}

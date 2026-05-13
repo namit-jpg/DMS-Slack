@@ -55,7 +55,21 @@ export function buildDashboardView(
       type: 'actions' as const,
       elements: [
         buildButton(':twisted_rightwards_arrows: Secondary Orders', 'secondary_orders_menu', 'secondary'),
-        buildButton(':leftwards_arrow_with_hook: Returns & Claims', 'returns_claims_menu', 'returns'),
+        buildButton(':receipt: Bulk Secondary Invoice', 'bulk_secondary_invoice', 'bulk_invoice'),
+      ],
+    },
+    {
+      type: 'actions' as const,
+      elements: [
+        buildButton(':leftwards_arrow_with_hook: Returns', 'returns_menu', 'returns'),
+        buildButton(':memo: Claims', 'claims_menu', 'claims'),
+      ],
+    },
+    {
+      type: 'actions' as const,
+      elements: [
+        buildButton(':package: Inventory Visibility', 'view_inventory', 'inventory'),
+        buildButton(':page_facing_up: Partially Fulfilled', 'view_partial_orders', 'partial'),
       ],
     },
     {
