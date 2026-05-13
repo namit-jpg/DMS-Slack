@@ -8,7 +8,7 @@ export function buildProductSelectionModal(
   products: DMSProduct[],
   selected: Array<{ productId: string; quantity: number; schemeDiscount?: number }>,
 ): Block[] {
-  const blocks: Block[] = [buildHeader(':shopping_cart: Create Primary Order')];
+  const blocks: Block[] = [buildHeader(':shopping_trolley: Create Primary Order')];
   if (selected.length > 0) {
     blocks.push(buildSection('*Selected Products*'));
     selected.forEach((s, idx) => {

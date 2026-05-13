@@ -628,7 +628,7 @@ export function registerAllActions(
           const emoji = lowStock ? ':warning:' : ':green_circle:';
           blocks.push(buildSection(`${emoji} *${entry.productName}*\nTotal Stock: ${entry.totalStock}${lowStock ? ' (Low!)' : ''} | Batches: ${entry.batches.length}`));
           if (lowStock) {
-            blocks.push({ type: 'actions', elements: [buildButton(':shopping_cart: Place Replenishment Order', `replenish_order_${id}`, id, 'primary')] });
+            blocks.push({ type: 'actions', elements: [buildButton(':shopping_trolley: Place Replenishment Order', `replenish_order_${id}`, id, 'primary')] });
           }
           blocks.push(buildDivider());
         }
@@ -646,7 +646,7 @@ export function registerAllActions(
       const products = await sfClient.getAvailableProducts(ctx);
       const product = products.find((p) => p.productId === productId);
       const blocks: any[] = [
-        buildHeader(':shopping_cart: Replenishment Order'),
+        buildHeader(':shopping_trolley: Replenishment Order'),
         buildSection(`Create a primary order for *${product?.productName || productId}* to replenish low stock.`),
         buildDivider(),
         buildSection('Click "Create Primary Order" and add this product with your desired quantity.'),
