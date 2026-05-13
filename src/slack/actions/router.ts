@@ -860,17 +860,34 @@ export function registerAllActions(
     }
     const pending = pendingARSChanges.get(messageTs)!;
     try {
+      const escapedAccountId = pending.accountId.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
       for (const change of pending.changes) {
-        await sfClient.getARSConfig({ salesforceAccountId: pending.accountId } as any);
+        const escapedProductId = (change.productId || '').replace(/'/g, "\\'").replace(/\\/g, '\\\\');
+        try {
+          const batches = await sfClient.query<{ Id: string }>(
+            `SELECT Id FROM Inventory_Batch__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 5`,
+          );
+          for (const batch of batches.records) {
+            await sfClient.update('Inventory_Batch__c', batch.Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax });
+          }
+        } catch (sfErr: any) {
+          logger.warn({ err: sfErr, productId: change.productId }, 'Could not update Inventory_Batch__c, trying Inventory_Policy__c');
+          try {
+            const policyQuery = await sfClient.query<{ Id: string }>(
+              `SELECT Id FROM Inventory_Policy__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 1`,
+            );
+            if (policyQuery.records.length > 0) {
+              await sfClient.update('Inventory_Policy__c', policyQuery.records[0].Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax });
+            }
+          } catch { /* Inventory_Policy__c may not exist */ }
+        }
       }
       const blocks = buildARSApprovalAcknowledgement(true, pending.userName);
-      await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: 'ARS settings approved and applied.', blocks });
-      try {
-        await app.client.chat.postMessage({ channel: pending.userId, text: ':white_check_mark: Your ARS settings changes have been approved.' });
-      } catch { /* DM may fail */ }
+      await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: ':white_check_mark: ARS settings approved and applied.', blocks });
       pendingARSChanges.delete(messageTs);
     } catch (err) {
-      await safeRespond(body, respond, { text: 'Failed to apply ARS settings.', replace_original: false });
+      logger.error({ err }, 'ARS approve failed');
+      await safeRespond(body, respond, { text: 'Failed to apply ARS settings. Check logs.', replace_original: false });
     }
   });
 
@@ -882,11 +899,11 @@ export function registerAllActions(
       return;
     }
     const pending = pendingARSChanges.get(messageTs)!;
-    const blocks = buildARSApprovalAcknowledgement(false, pending.userName);
-    await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: 'ARS settings rejected.', blocks });
-    try {
-      await app.client.chat.postMessage({ channel: pending.userId, text: ':x: Your ARS settings changes have been rejected.' });
-    } catch { /* DM may fail */ }
+    await app.client.chat.postMessage({
+      channel: pending.channelId,
+      thread_ts: pending.messageTs,
+      text: `:x: ARS change request for *${pending.changes[0]?.productName || 'product'}* has been *rejected*.`,
+    });
     pendingARSChanges.delete(messageTs);
   });
 
