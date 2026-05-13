@@ -829,8 +829,10 @@ export function registerAllActions(
       if (posted) {
         await safeRespond(body, respond, { text: `:white_check_mark: Change request for ${info.productName} sent to #${salesChannelRaw}.\n*Reason:* ${reason}`, replace_original: false });
       } else {
-        await app.client.chat.postMessage({ channel: userId, text: `ARS Change Request — ${info.productName}\nReason: ${reason}`, blocks: crApprovalBlocks });
-        await safeRespond(body, respond, { text: `:white_check_mark: Change request sent to your DMs (bot needs to be in #${salesChannelRaw}).\n*Reason:* ${reason}`, replace_original: false });
+        try {
+          await app.client.chat.postMessage({ channel: userId, text: `ARS Change Request — ${info.productName}\nReason: ${reason}`, blocks: crApprovalBlocks });
+        } catch { /* DM may also fail — messages_tab_disabled */ }
+        await safeRespond(body, respond, { text: `:white_check_mark: Change request recorded for ${info.productName}. Could not deliver to #${salesChannelRaw}. Reason: ${reason}`, replace_original: false });
       }
     } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
   });
