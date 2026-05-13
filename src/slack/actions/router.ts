@@ -741,7 +741,7 @@ export function registerAllActions(
       }];
 
       const approvalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, changes);
-      const salesChannelRaw = process.env.SLACK_SALES_CHANNEL || 'sales';
+      const salesChannelRaw = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
 
       let posted = false;
       try {
@@ -816,7 +816,7 @@ export function registerAllActions(
       const newMin = newMinVal ? (parseInt(newMinVal, 10) || info.minStock) : info.minStock;
       const newMax = newMaxVal ? (parseInt(newMaxVal, 10) || info.maxStock) : info.maxStock;
       const crApprovalBlocks = buildARSApprovalMessage(identity.displayName, ctx.accountName, [{ productName: info.productName, oldMin: info.minStock, newMin, oldMax: info.maxStock, newMax }]);
-      const salesChannelRaw = process.env.SLACK_SALES_CHANNEL || 'sales';
+      const salesChannelRaw = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
 
       let posted = false;
       try {

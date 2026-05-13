@@ -55,7 +55,7 @@ async function main() {
       logger.info({ orderId: order.orderId, accountId: ctx.salesforceAccountId }, 'New secondary order notification');
       const partialNote = order.fulfillmentStatus === 'Partially Fulfilled' || order.invoiceStatus === 'Partial' ? ' :warning: *PARTIAL*' : '';
       try {
-        const salesChannel = process.env.SLACK_SALES_CHANNEL || 'sales';
+        const salesChannel = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
         await app.client.chat.postMessage({
           channel: salesChannel,
           text: `:twisted_rightwards_arrows: New Secondary Order: *${order.orderNumber}*${partialNote}\nRetailer: ${order.retailerCustomer}\nAmount: Rs ${order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nStatus: ${order.status} | Invoice: ${order.invoiceStatus || 'N/A'} | Fulfillment: ${order.fulfillmentStatus || 'N/A'}`,
