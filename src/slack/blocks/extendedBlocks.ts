@@ -109,7 +109,7 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
     {
       type: 'input',
       block_id: 'ars_search_block',
-      label: { type: 'plain_text', text: ':mag: Search to Edit a Product', emoji: true },
+      label: { type: 'plain_text', text: ':mag: Search Product', emoji: true },
       element: {
         type: 'plain_text_input',
         action_id: 'ars_search_input',
@@ -166,9 +166,7 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
       blocks.push({
         type: 'actions',
         elements: [
-          buildButton(':pencil2: Edit', `ars_edit_product_${b.productId}`, batchValue),
           buildButton(':memo: Request Change', `ars_request_change_${b.productId}`, batchValue),
-          buildButton(':x: Deactivate', `ars_deactivate_product_${b.productId}`, batchValue, 'danger'),
         ],
       });
     });
