@@ -15,7 +15,7 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
     type: 'input',
     block_id: 'so_search_block',
     label: { type: 'plain_text', text: ':mag: Search Secondary Orders', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'search_so_input', placeholder: { type: 'plain_text', text: 'Type order number or retailer...' }, initial_value: searchTerm || undefined },
+    element: { type: 'plain_text_input', action_id: 'search_so_input', placeholder: { type: 'plain_text', text: 'Type order number or retailer...', emoji: true }, initial_value: searchTerm || undefined },
     optional: true,
   });
   blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_so_button', 'search', 'primary')] });
@@ -29,7 +29,7 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
       blocks.push({
         type: 'section',
         text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'}` },
-        accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details' }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
+        accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());
     });
@@ -113,7 +113,7 @@ export function buildARSDashboard(config: ArsConfig, triggeredOrders: ArsTrigger
       element: {
         type: 'plain_text_input',
         action_id: 'ars_search_input',
-        placeholder: { type: 'plain_text', text: 'Type product name or batch number...' },
+        placeholder: { type: 'plain_text', text: 'Type product name or batch number...', emoji: true },
         initial_value: searchTerm || undefined,
       },
       optional: true,
@@ -187,12 +187,12 @@ export function buildARSEditProduct(productInfo: { productId: string; productNam
     buildDivider(),
     {
       type: 'input', block_id: 'ars_edit_min',
-      label: { type: 'plain_text', text: 'Minimum Stock Quantity' },
+      label: { type: 'plain_text', text: 'Minimum Stock Quantity', emoji: true },
       element: { type: 'plain_text_input', action_id: 'ars_edit_min_val', initial_value: String(productInfo.minStock) },
     },
     {
       type: 'input', block_id: 'ars_edit_max',
-      label: { type: 'plain_text', text: 'Maximum Stock Quantity' },
+      label: { type: 'plain_text', text: 'Maximum Stock Quantity', emoji: true },
       element: { type: 'plain_text_input', action_id: 'ars_edit_max_val', initial_value: String(productInfo.maxStock) },
     },
     buildDivider(),
@@ -210,17 +210,17 @@ export function buildARSChangeRequestForm(productInfo: { productId: string; prod
     buildDivider(),
     {
       type: 'input', block_id: 'ars_cr_reason',
-      label: { type: 'plain_text', text: 'Reason for Change' },
-      element: { type: 'plain_text_input', action_id: 'ars_cr_reason_val', multiline: true, placeholder: { type: 'plain_text', text: 'Describe why you need this change...' } },
+      label: { type: 'plain_text', text: 'Reason for Change', emoji: true },
+      element: { type: 'plain_text_input', action_id: 'ars_cr_reason_val', multiline: true, placeholder: { type: 'plain_text', text: 'Describe why you need this change...', emoji: true } },
     },
     {
       type: 'input', block_id: 'ars_cr_new_min', optional: true,
-      label: { type: 'plain_text', text: 'Requested Min Stock (leave blank to keep current)' },
+      label: { type: 'plain_text', text: 'Requested Min Stock (leave blank to keep current)', emoji: true },
       element: { type: 'plain_text_input', action_id: 'ars_cr_new_min_val', initial_value: String(productInfo.minStock) },
     },
     {
       type: 'input', block_id: 'ars_cr_new_max', optional: true,
-      label: { type: 'plain_text', text: 'Requested Max Stock (leave blank to keep current)' },
+      label: { type: 'plain_text', text: 'Requested Max Stock (leave blank to keep current)', emoji: true },
       element: { type: 'plain_text_input', action_id: 'ars_cr_new_max_val', initial_value: String(productInfo.maxStock) },
     },
     buildDivider(),

@@ -133,6 +133,7 @@ export function buildConfirmationDialog(
     title: {
       type: 'plain_text' as const,
       text: title,
+      emoji: true,
     },
     text: {
       type: 'mrkdwn' as const,
@@ -141,10 +142,12 @@ export function buildConfirmationDialog(
     confirm: {
       type: 'plain_text' as const,
       text: confirm,
+      emoji: true,
     },
     deny: {
       type: 'plain_text' as const,
       text: deny,
+      emoji: true,
     },
   };
 }

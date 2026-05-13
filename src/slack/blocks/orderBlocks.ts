@@ -31,7 +31,7 @@ export function buildProductSelectionModal(
     type: 'input',
     block_id: 'product_search_block',
     label: { type: 'plain_text', text: ':mag: Search Products', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'search_products_input', placeholder: { type: 'plain_text', text: 'Type product name or code...' } },
+    element: { type: 'plain_text_input', action_id: 'search_products_input', placeholder: { type: 'plain_text', text: 'Type product name or code...', emoji: true } },
     optional: true,
   });
   blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_products_button', 'search', 'primary')] });
@@ -126,7 +126,7 @@ export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): B
     type: 'input',
     block_id: 'order_search_block',
     label: { type: 'plain_text', text: ':mag: Search Orders', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'search_orders_input', placeholder: { type: 'plain_text', text: 'Type order number...' }, initial_value: searchTerm || undefined },
+    element: { type: 'plain_text_input', action_id: 'search_orders_input', placeholder: { type: 'plain_text', text: 'Type order number...', emoji: true }, initial_value: searchTerm || undefined },
     optional: true,
   });
   blocks.push({ type: 'actions', elements: [buildButton(':mag: Search', 'search_orders_button', 'search', 'primary')] });
@@ -198,7 +198,7 @@ export function buildGRNModal(orderDetail: PrimaryOrderDetail): Block[] {
   blocks.push({
     type: 'input', block_id: 'grn_notes',
     label: { type: 'plain_text', text: 'Notes', emoji: true },
-    element: { type: 'plain_text_input', action_id: 'grn_input_notes', placeholder: { type: 'plain_text', text: 'Any additional notes...' } }, optional: true,
+      element: { type: 'plain_text_input', action_id: 'grn_input_notes', placeholder: { type: 'plain_text', text: 'Any additional notes...', emoji: true } }, optional: true,
   });
   blocks.push({ type: 'actions', elements: [
     buildButton(':white_check_mark: Submit GRN', 'submit_grn_form', orderDetail.orderId, 'primary'),
@@ -276,23 +276,23 @@ export function buildClaimModal(returnOrderId: string): Block[] {
     {
       type: 'input', block_id: 'claim_type',
       label: { type: 'plain_text', text: 'Claim Type', emoji: true },
-      element: { type: 'static_select', action_id: 'claim_input_type', placeholder: { type: 'plain_text', text: 'Select claim type' }, options: [
-        { text: { type: 'plain_text', text: 'Damaged Goods' }, value: 'Damaged Goods' },
-        { text: { type: 'plain_text', text: 'Missing Quantity' }, value: 'Missing Quantity' },
-        { text: { type: 'plain_text', text: 'Quality Issue' }, value: 'Quality Issue' },
-        { text: { type: 'plain_text', text: 'Pricing Dispute' }, value: 'Pricing Dispute' },
-        { text: { type: 'plain_text', text: 'Other' }, value: 'Other' },
+      element: { type: 'static_select', action_id: 'claim_input_type', placeholder: { type: 'plain_text', text: 'Select claim type', emoji: true }, options: [
+        { text: { type: 'plain_text', text: 'Damaged Goods', emoji: true }, value: 'Damaged Goods' },
+        { text: { type: 'plain_text', text: 'Missing Quantity', emoji: true }, value: 'Missing Quantity' },
+        { text: { type: 'plain_text', text: 'Quality Issue', emoji: true }, value: 'Quality Issue' },
+        { text: { type: 'plain_text', text: 'Pricing Dispute', emoji: true }, value: 'Pricing Dispute' },
+        { text: { type: 'plain_text', text: 'Other', emoji: true }, value: 'Other' },
       ]},
     },
     {
       type: 'input', block_id: 'claim_amount',
       label: { type: 'plain_text', text: 'Claim Amount (Rs)', emoji: true },
-      element: { type: 'plain_text_input', action_id: 'claim_input_amount', placeholder: { type: 'plain_text', text: 'e.g. 1500.00' } },
+      element: { type: 'plain_text_input', action_id: 'claim_input_amount', placeholder: { type: 'plain_text', text: 'e.g. 1500.00', emoji: true } },
     },
     {
       type: 'input', block_id: 'claim_desc',
       label: { type: 'plain_text', text: 'Description', emoji: true },
-      element: { type: 'plain_text_input', action_id: 'claim_input_desc', multiline: true, placeholder: { type: 'plain_text', text: 'Describe the issue...' } },
+      element: { type: 'plain_text_input', action_id: 'claim_input_desc', multiline: true, placeholder: { type: 'plain_text', text: 'Describe the issue...', emoji: true } },
     },
     buildDivider(),
     { type: 'actions', elements: [
