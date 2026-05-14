@@ -5,7 +5,7 @@ import {
   FileUploadPayload, FileUploadResult, ApprovalResult, ApprovalStatus, CreditNote,
   SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, InvoicePayload, DMSInvoice,
   DispatchRequest, SecondaryOrderGRN, ArsConfig, ArsTriggeredOrder, BatchStockPolicy,
-  AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation, FulfillmentResult,
+  AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation,
 } from './types';
 
 const MOCK_ACCOUNTS: SalesforceRecord[] = [
@@ -400,13 +400,15 @@ export class MockSalesforceClient implements ISalesforceClient {
       requestedDeliveryDate: (so.Requested_Delivery_Date__c || '') as string,
       items: MOCK_PRODUCTS.slice(0, 2).map((p, idx) => ({
         itemId: `soi-${idx}`, productId: p.Id as string, productName: p.Name as string,
-        orderedQuantity: 30, availableQuantity: 30, fulfilledQuantity: 0, pendingQuantity: 30,
+        orderedQuantity: 30, availableQuantity: 20, fulfilledQuantity: 0, pendingQuantity: 30,
         unitPrice: (p.Unit_Price__c || 0) as number, unitOfMeasure: (p.Unit_Of_Measure__c || 'Each') as string,
       })),
       invoiceIds: ['a03MOCK000000001'], dispatchIds: ['d04MOCK000000001'], grnIds: [],
       canCreateInvoice: true, canUpdateDispatch: true,
       sourceAddress: '123 Distributor Warehouse, Mumbai', destinationAddress: '456 Retail Store, Pune',
-      remainingQtys: [],
+      remainingQtys: MOCK_PRODUCTS.slice(0, 2).map((p) => ({
+        productId: p.Id as string, productName: p.Name as string, orderedQty: 30, remainingQty: 30,
+      })),
     };
   }
 
@@ -437,17 +439,6 @@ export class MockSalesforceClient implements ISalesforceClient {
 
   async getSecondaryOrderGRN(_ctx: ResolvedDistributorContext, orderId: string): Promise<SecondaryOrderGRN> {
     return { grnId: 'grnSO001', grnNumber: 'GRN-SO-0001', secondaryOrderId: orderId, status: 'Completed', items: [{ productId: '01tMOCK000000001', receivedQuantity: 30 }] };
-  }
-
-  async fulfillSecondaryOrder(_ctx: ResolvedDistributorContext, orderId: string): Promise<FulfillmentResult> {
-    const invId = `invMOCK_${Date.now().toString(36)}`;
-    return {
-      invoiceId: invId, invoiceNumber: `INV-SO-${invId.slice(-4)}`,
-      dispatchId: `dMOCK_${Date.now().toString(36)}`,
-      orderStatus: 'Fully Invoiced',
-      items: [{ productId: '01tMOCK000000001', productName: 'Beverage Pack A', fulfilledQty: 20, remainingQty: 10 }, { productId: '01tMOCK000000002', productName: 'Snack Box B', fulfilledQty: 15, remainingQty: 15 }],
-      isFull: false,
-    };
   }
 
   async getARSConfig(_ctx: ResolvedDistributorContext): Promise<ArsConfig> {
@@ -517,7 +508,7 @@ export class MockSalesforceClient implements ISalesforceClient {
     this.objectFields.set('Return_Order__c', ['Id', 'Name', 'Account__c', 'Status__c', 'Grand_Total__c', 'Order__c', 'Type__c', 'Description__c', 'Approval_Status__c', 'Goods_Receipt_Note__c']);
     this.objectFields.set('Invoice__c', ['Id', 'Name', 'Billing_Account__c', 'Status__c', 'Total_Amount__c', 'Invoice_Date__c', 'Payment_Status__c', 'Type__c']);
     this.objectFields.set('Claim__c', ['Id', 'Name', 'Account__c', 'Claim_Type__c', 'Status__c', 'Amount__c', 'Total_Amount__c', 'Notes__c', 'Claim_Number__c', 'Distributor__c']);
-    this.objectFields.set('GRN__c', ['Id', 'Name', 'Account__c', 'Status__c', 'Order__c']);
+    this.objectFields.set('Goods_Receipt__c', ['Id', 'Name', 'Status__c', 'Order__c']);
     this.objectFields.set('Dispatch_Request__c', ['Id', 'Name', 'Order__c', 'Status__c', 'Dispatch_Request_Name__c']);
     this.objectFields.set('Inventory_Batch__c', ['Id', 'Product__c', 'Distributor__c', 'Expiry_Date__c', 'Status__c']);
     this.objectFields.set('StoreScheme__c', ['Id', 'Retail_Store__c', 'Status__c', 'Start_Date__c', 'End_Date__c']);

@@ -667,7 +667,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       if (result.records.length === 0) throw new SalesforceError('Order not found or access denied');
       const r = result.records[0];
       const items = await this.getOrderItems(r.Id, correlationId);
-      const grnIds = await this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId);
+      const grnIds = await this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId);
       const returnOrderIds = await this.getRelatedIds('Return_Order__c', 'Order__c', r.Id, correlationId);
       const invoiceIds = await this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId);
       const dispatchIds = await this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId);
@@ -706,10 +706,9 @@ export class SalesforceRestClient implements ISalesforceClient {
       );
       const overallStatus = hasIssues ? 'Partially Received' : 'Fully Received';
 
-      // Create one GRN__c header record per order
-      const grnHeaderId = await this.create('GRN__c', {
+      // Create one Goods_Receipt__c header record per order
+      const grnHeaderId = await this.create('Goods_Receipt__c', {
         Order__c: orderId,
-        Account__c: context.salesforceAccountId,
         Status__c: overallStatus,
         Notes__c: grnData.notes || '',
       }, correlationId);
@@ -727,7 +726,7 @@ export class SalesforceRestClient implements ISalesforceClient {
               ? 'Short Supply'
               : 'Good';
         await this.createGRNLineWithFallback({
-          GRN__c: grnHeaderId,
+          Goods_Receipt__c: grnHeaderId,
           Product__c: item.productId,
           Order_Type__c: orderType,
           Quantity__c: item.expectedQuantity,
@@ -778,7 +777,7 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getGRNDetails(_context: ResolvedDistributorContext, grnId: string, correlationId?: string): Promise<GRNResult> {
     try {
-      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number; Notes__c: string }>('GRN__c', grnId, undefined, correlationId);
+      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number; Notes__c: string }>('Goods_Receipt__c', grnId, undefined, correlationId);
       return {
         grnId: r.Id, grnNumber: r.Name, orderId: r.Order__c || '',
         status: r.Status__c, items: [], notes: r.Notes__c || '',
@@ -930,8 +929,10 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<SecondaryOrder[]> {
     try {
       const escapedId = escapeSoql(context.salesforceAccountId);
-      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(`SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`, correlationId)).records;
-      // Batch-resolve any missing retailer names via Account query
+      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string; Fulfillment_Status__c?: string }>(
+        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type, Fulfillment_Status__c FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`,
+        correlationId,
+      )).records;
       const missingIds = [...new Set(records.filter((r) => !r.Retailer_Account__r?.Name && r.Retailer_Account__c).map((r) => r.Retailer_Account__c as string))];
       const nameMap = new Map<string, string>();
       if (missingIds.length > 0) {
@@ -941,87 +942,307 @@ export class SalesforceRestClient implements ISalesforceClient {
           accountResult.records.forEach((a) => nameMap.set(a.Id, a.Name));
         } catch { /* best effort */ }
       }
-      return records.map((r) => ({
-        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
-        retailerCustomer: r.Retailer_Account__r?.Name || nameMap.get(r.Retailer_Account__c || '') || r.Retailer_Account__c || 'Unknown Retailer',
-        status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
-        fulfillmentStatus: r.Status, invoiceStatus: '', dispatchStatus: '', orderDate: r.EffectiveDate || '', items: [], type: r.Type,
-      }));
+      return records.map((r) => {
+        const fulfillmentStatus = r.Fulfillment_Status__c || r.Status;
+        return {
+          orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
+          retailerCustomer: r.Retailer_Account__r?.Name || nameMap.get(r.Retailer_Account__c || '') || r.Retailer_Account__c || 'Unknown Retailer',
+          status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
+          fulfillmentStatus, invoiceStatus: '', dispatchStatus: '', orderDate: r.EffectiveDate || '', items: [], type: r.Type,
+        };
+      });
     } catch { throw new SalesforceError('Failed to fetch secondary orders', { userMessage: 'Unable to load secondary orders.' }); }
   }
 
   async getSecondaryOrderDetails(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderDetail> {
-    const escapedId = escapeSoql(secondaryOrderId);
-    const escapedAccountId = escapeSoql(context.salesforceAccountId);
-    const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
-      `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
-      correlationId,
-    );
-    if (result.records.length === 0) {
-      throw new SalesforceError('Secondary order not found', { userMessage: 'Unable to load this secondary order.' });
+    try {
+      const escapedId = escapeSoql(secondaryOrderId);
+      const escapedAccountId = escapeSoql(context.salesforceAccountId);
+      const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Fulfillment_Status__c?: string }>(
+        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Fulfillment_Status__c FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
+        correlationId,
+      );
+      if (result.records.length === 0) {
+        throw new SalesforceError('Secondary order not found', { userMessage: 'Unable to load this secondary order.' });
+      }
+      const r = result.records[0];
+      const fulfillmentStatus = r.Fulfillment_Status__c || r.Status || 'Unknown';
+      const isFullyFulfilled = ['Fully Invoiced', 'Fully Fulfilled'].includes(fulfillmentStatus);
+
+      const [orderItems, invoiceIds, dispatchIds, grnIds, fulfilledMap, sourceAddress] = await Promise.all([
+        this.getOrderItems(r.Id, correlationId),
+        this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId),
+        this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId),
+        this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId),
+        this.getFulfilledQtyByProduct(r.Id, correlationId),
+        this.getShippingAddress(r.AccountId, correlationId),
+      ]);
+
+      const retailerId = r.Retailer_Account__c;
+      const retailerName = r.Retailer_Account__r?.Name
+        || (retailerId ? await this.query<{ Name: string }>(`SELECT Name FROM Account WHERE Id = '${escapeSoql(retailerId)}' LIMIT 1`, correlationId).then((res) => res.records[0]?.Name || 'Unknown Retailer').catch(() => 'Unknown Retailer') : 'Unknown Retailer');
+      const destinationAddress = retailerId ? await this.getShippingAddress(retailerId, correlationId) : '';
+
+      const items = orderItems.map((i) => {
+        const fulfilledQty = fulfilledMap.get(i.productId) || 0;
+        const pendingQty = Math.max(0, i.quantity - fulfilledQty);
+        return {
+          itemId: i.itemId, productId: i.productId, productName: i.productName,
+          orderedQuantity: i.quantity, availableQuantity: 0,
+          fulfilledQuantity: fulfilledQty, pendingQuantity: pendingQty,
+          unitPrice: i.unitPrice, unitOfMeasure: i.unitOfMeasure,
+        };
+      });
+
+      const remainingQtys = items
+        .filter((i) => i.pendingQuantity > 0)
+        .map((i) => ({ productId: i.productId, productName: i.productName, orderedQty: i.orderedQuantity, remainingQty: i.pendingQuantity }));
+
+      const invoiceStatusDisplay = invoiceIds.length === 0 ? 'Not Invoiced' : isFullyFulfilled ? 'Fully Invoiced' : 'Partially Invoiced';
+      const dispatchStatusDisplay = dispatchIds.length > 0 ? 'Dispatch Created' : 'No Dispatch';
+
+      return {
+        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
+        retailerCustomer: retailerName, status: r.Status,
+        totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
+        fulfillmentStatus, invoiceStatus: invoiceStatusDisplay,
+        dispatchStatus: dispatchStatusDisplay, orderDate: r.EffectiveDate,
+        items, invoiceIds, dispatchIds, grnIds,
+        canCreateInvoice: !isFullyFulfilled && items.some((i) => i.pendingQuantity > 0),
+        canUpdateDispatch: dispatchIds.length > 0,
+        sourceAddress, destinationAddress: destinationAddress || retailerName,
+        type: 'Secondary', remainingQtys,
+      };
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Failed to fetch secondary order details', { userMessage: 'Unable to load secondary order details.' });
     }
-    const r = result.records[0];
-    const orderItems = await this.getOrderItems(r.Id, correlationId);
-    const items = orderItems.map((i) => ({
-      itemId: i.itemId,
-      productId: i.productId,
-      productName: i.productName,
-      orderedQuantity: i.quantity,
-      availableQuantity: 0,
-      fulfilledQuantity: 0,
-      pendingQuantity: i.quantity,
-      unitPrice: i.unitPrice,
-      unitOfMeasure: i.unitOfMeasure,
-    }));
-    const invoiceIds = await this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId);
-    const dispatchIds = await this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId);
-    const grnIds = await this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId);
-    return {
-      orderId: r.Id,
-      orderNumber: r.OrderNumber,
-      distributorId: r.AccountId,
-      retailerCustomer: r.Retailer_Account__r?.Name || (r.Retailer_Account__c ? await this.query<{ Id: string; Name: string }>(`SELECT Id, Name FROM Account WHERE Id = '${escapeSoql(r.Retailer_Account__c)}'`, correlationId).then((res) => res.records[0]?.Name || 'Unknown Retailer').catch(() => 'Unknown Retailer') : 'Unknown Retailer'),
-      status: r.Status,
-      totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
-      fulfillmentStatus: r.Status,
-      invoiceStatus: invoiceIds.length > 0 ? 'Invoiced' : 'Not Invoiced',
-      dispatchStatus: dispatchIds.length > 0 ? 'Dispatch Created' : 'No Dispatch',
-      orderDate: r.EffectiveDate,
-      items,
-      invoiceIds,
-      dispatchIds,
-      grnIds,
-      canCreateInvoice: false,
-      canUpdateDispatch: false,
-      sourceAddress: '',
-      destinationAddress: '',
-      type: 'Secondary',
-      remainingQtys: [],
-    };
   }
 
-  async getInventoryAvailability(_context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<InventoryAvailability[]> {
-    const detail = await this.getSecondaryOrderDetails(_context, secondaryOrderId, correlationId);
-    return detail.items.map((i) => ({
-      productId: i.productId,
-      productName: i.productName,
-      orderedQuantity: i.orderedQuantity,
-      availableQuantity: i.availableQuantity,
-      batchDetails: [],
-    }));
-  }
-  async createInvoice(context: ResolvedDistributorContext, orderId: string, payload: InvoicePayload): Promise<DMSInvoice> {
+  async getInventoryAvailability(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<InventoryAvailability[]> {
     try {
-      const record: Record<string, unknown> = { Billing_Account__c: context.salesforceAccountId, Status__c: 'Generated', Total_Amount__c: 0, Type__c: payload.fullOrPartial };
-      const id = await this.create('Invoice__c', record);
-      return { invoiceId: id, invoiceNumber: `INV-${id.slice(-4)}`, accountId: context.salesforceAccountId, status: 'Generated', totalAmount: 0, paymentStatus: 'Unpaid', type: payload.fullOrPartial, fullPartial: payload.fullOrPartial };
-    } catch { throw new SalesforceError('Invoice creation failed', { userMessage: 'Unable to create invoice.' }); }
+      const detail = await this.getSecondaryOrderDetails(context, secondaryOrderId, correlationId);
+      const pendingItems = detail.items.filter((i) => i.pendingQuantity > 0);
+      if (pendingItems.length === 0) return [];
+      const inventoryMap = await this.getProductInventory(context.salesforceAccountId, pendingItems.map((i) => i.productId), correlationId);
+      return pendingItems.map((i) => {
+        const inv = inventoryMap.get(i.productId);
+        return {
+          productId: i.productId, productName: i.productName,
+          orderedQuantity: i.pendingQuantity, // pending qty is what we still need to invoice
+          availableQuantity: inv ? Math.min(inv.qty, i.pendingQuantity) : 0,
+          batchDetails: inv?.batches ?? [],
+        };
+      });
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Inventory availability check failed', { userMessage: 'Unable to check inventory availability.' });
+    }
   }
-  async getInvoiceDetails(): Promise<DMSInvoice> { throw new SalesforceError('Invoice details not available.'); }
-  async getDispatchRequests(): Promise<DispatchRequest[]> { throw new SalesforceError('Dispatch request retrieval not available (BLK-004).'); }
-  async updateDispatchStatus(): Promise<DispatchRequest> { throw new SalesforceError('Dispatch status update not available (BLK-004).'); }
-  async getSecondaryOrderGRN(): Promise<SecondaryOrderGRN> { throw new SalesforceError('Secondary order GRN not available (BLK-004).'); }
-  async fulfillSecondaryOrder(): Promise<FulfillmentResult> { throw new SalesforceError('Secondary order fulfillment: SecondaryInvoiceCreation is @AuraEnabled only (BLK-004).'); }
+
+  async createInvoice(context: ResolvedDistributorContext, orderId: string, payload: InvoicePayload, correlationId?: string): Promise<DMSInvoice> {
+    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
+    try {
+      const invoiceItems = payload.items.filter((i) => i.quantity > 0);
+      if (invoiceItems.length === 0) {
+        throw new SalesforceError('No items to invoice', { userMessage: 'No stock available to invoice. Check inventory levels.' });
+      }
+      const orderItems = await this.getOrderItems(orderId, correlationId);
+      const priceMap = new Map(orderItems.map((i) => [i.productId, i.unitPrice]));
+      const totalAmount = invoiceItems.reduce((sum, i) => sum + (priceMap.get(i.productId) || 0) * i.quantity, 0);
+      const today = new Date().toISOString().split('T')[0];
+
+      log.info({ orderId, itemCount: invoiceItems.length, totalAmount, fullOrPartial: payload.fullOrPartial }, 'Creating secondary invoice');
+
+      // 1. Create Invoice__c header
+      const invoiceId = await this.create('Invoice__c', {
+        Billing_Account__c: context.salesforceAccountId,
+        Order__c: orderId,
+        Status__c: 'Generated',
+        Total_Amount__c: totalAmount,
+        Invoice_Amount__c: totalAmount,
+        Invoice_Date__c: today,
+        Full_Partial__c: payload.fullOrPartial,
+        Type__c: 'Secondary',
+      }, correlationId);
+      log.info({ invoiceId }, 'Invoice__c created');
+
+      // 2. Create Invoice_Line_Item__c per product (best effort — fields may vary)
+      for (const item of invoiceItems) {
+        const unitPrice = priceMap.get(item.productId) || 0;
+        try {
+          await this.create('Invoice_Line_Item__c', {
+            Invoice__c: invoiceId,
+            Product__c: item.productId,
+            Quantity__c: item.quantity,
+            Unit_Price__c: unitPrice,
+            Amount__c: unitPrice * item.quantity,
+            Status__c: 'Active',
+          }, correlationId);
+        } catch (lineErr) {
+          log.warn({ err: lineErr, productId: item.productId }, 'Invoice line item creation failed — invoice header intact');
+        }
+      }
+
+      // 3. Deduct inventory from batches (FIFO, best effort)
+      try {
+        const inventoryMap = await this.getProductInventory(context.salesforceAccountId, invoiceItems.map((i) => i.productId), correlationId);
+        for (const item of invoiceItems) {
+          let remaining = item.quantity;
+          const inv = inventoryMap.get(item.productId);
+          if (!inv) continue;
+          for (const batch of inv.batches) {
+            if (remaining <= 0) break;
+            const deduct = Math.min(remaining, batch.quantity);
+            try {
+              await this.update('Inventory_Batch__c', batch.batchId, { Quantity__c: batch.quantity - deduct }, correlationId);
+            } catch {
+              try {
+                await this.update('Inventory_Batch__c', batch.batchId, { Available_Quantity__c: batch.quantity - deduct }, correlationId);
+              } catch { log.warn({ batchId: batch.batchId }, 'Could not deduct inventory batch'); }
+            }
+            remaining -= deduct;
+          }
+        }
+      } catch (invErr) {
+        log.warn({ err: invErr }, 'Inventory deduction failed — invoice still created');
+      }
+
+      // 4. Create Dispatch_Request__c with proper addresses
+      let dispatchId: string | undefined;
+      try {
+        const orderRec = await this.query<{ AccountId: string; Retailer_Account__c?: string }>(
+          `SELECT AccountId, Retailer_Account__c FROM Order WHERE Id = '${escapeSoql(orderId)}' LIMIT 1`, correlationId,
+        );
+        const distributorId = orderRec.records[0]?.AccountId || context.salesforceAccountId;
+        const retailerId = orderRec.records[0]?.Retailer_Account__c;
+        const [sourceAddr, destAddr] = await Promise.all([
+          this.getShippingAddress(distributorId, correlationId),
+          retailerId ? this.getShippingAddress(retailerId, correlationId) : Promise.resolve(''),
+        ]);
+        dispatchId = await this.create('Dispatch_Request__c', {
+          Order__c: orderId,
+          Invoice_Custom__c: invoiceId,
+          Status__c: 'Draft',
+          Dispatch_Request_Name__c: `DSP-${invoiceId.slice(-6).toUpperCase()}`,
+          Source_Address__c: sourceAddr || context.salesforceAccountId,
+          Destination_Address__c: destAddr || retailerId || '',
+          Start_Date__c: today,
+        }, correlationId);
+        log.info({ dispatchId }, 'Dispatch_Request__c created');
+      } catch (dispatchErr) {
+        log.warn({ err: dispatchErr }, 'Dispatch creation failed — invoice still created');
+      }
+
+      // 5. Update Order Fulfillment_Status__c
+      try {
+        const fulfilledMap = await this.getFulfilledQtyByProduct(orderId, correlationId);
+        invoiceItems.forEach((i) => fulfilledMap.set(i.productId, (fulfilledMap.get(i.productId) || 0) + i.quantity));
+        const allFulfilled = orderItems.every((oi) => (fulfilledMap.get(oi.productId) || 0) >= oi.quantity);
+        const newStatus = allFulfilled ? 'Fully Invoiced' : 'Partially Fulfilled';
+        await this.update('Order', orderId, { Fulfillment_Status__c: newStatus }, correlationId);
+        log.info({ orderId, newStatus }, 'Order Fulfillment_Status__c updated');
+      } catch (statusErr) {
+        log.warn({ err: statusErr }, 'Could not update Order Fulfillment_Status__c');
+      }
+
+      return {
+        invoiceId, invoiceNumber: `INV-${invoiceId.slice(-6).toUpperCase()}`,
+        accountId: context.salesforceAccountId, orderId, status: 'Generated',
+        totalAmount, invoiceDate: today, paymentStatus: 'Unpaid',
+        type: 'Secondary', fullPartial: payload.fullOrPartial,
+      };
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Invoice creation failed', { userMessage: 'Unable to create invoice. Please try again.' });
+    }
+  }
+
+  async getInvoiceDetails(context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<DMSInvoice> {
+    try {
+      const r = await this.getRecord<{ Id: string; Name: string; Billing_Account__c: string; Order__c?: string; Status__c: string; Total_Amount__c?: number; Invoice_Date__c?: string; Payment_Status__c?: string; Full_Partial__c?: string; Type__c?: string }>('Invoice__c', invoiceId, undefined, correlationId);
+      return {
+        invoiceId: r.Id, invoiceNumber: r.Name, accountId: r.Billing_Account__c,
+        orderId: r.Order__c, status: r.Status__c, totalAmount: r.Total_Amount__c || 0,
+        invoiceDate: r.Invoice_Date__c, paymentStatus: r.Payment_Status__c,
+        type: r.Type__c, fullPartial: r.Full_Partial__c,
+      };
+    } catch (err) {
+      throw new SalesforceError('Invoice details fetch failed', { userMessage: 'Unable to load invoice details.' });
+    }
+  }
+
+  async getDispatchRequests(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<DispatchRequest[]> {
+    try {
+      const result = await this.query<{ Id: string; Dispatch_Request_Name__c?: string; Order__c?: string; Status__c: string; Invoice_Custom__c?: string; Start_Date__c?: string; End_Date__c?: string; Source_Address__c?: string; Destination_Address__c?: string }>(
+        `SELECT Id, Dispatch_Request_Name__c, Order__c, Status__c, Invoice_Custom__c, Start_Date__c, End_Date__c, Source_Address__c, Destination_Address__c FROM Dispatch_Request__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 20`,
+        correlationId,
+      );
+      return result.records.map((r) => ({
+        dispatchId: r.Id, dispatchName: r.Dispatch_Request_Name__c || r.Id,
+        orderId: r.Order__c, status: r.Status__c, invoiceId: r.Invoice_Custom__c,
+        startDate: r.Start_Date__c, endDate: r.End_Date__c,
+        sourceAddress: r.Source_Address__c, destinationAddress: r.Destination_Address__c,
+      }));
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Failed to fetch dispatch requests', { userMessage: 'Unable to load dispatch information.' });
+    }
+  }
+
+  async updateDispatchStatus(context: ResolvedDistributorContext, dispatchRequestId: string, newStatus: string, correlationId?: string): Promise<DispatchRequest> {
+    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
+    try {
+      await this.update('Dispatch_Request__c', dispatchRequestId, { Status__c: newStatus }, correlationId);
+      log.info({ dispatchRequestId, newStatus }, 'Dispatch status updated');
+
+      const r = await this.getRecord<{ Id: string; Dispatch_Request_Name__c?: string; Order__c?: string; Status__c: string; Invoice_Custom__c?: string; Start_Date__c?: string; End_Date__c?: string; Source_Address__c?: string; Destination_Address__c?: string }>('Dispatch_Request__c', dispatchRequestId, undefined, correlationId);
+
+      if (newStatus === 'Delivered') {
+        if (r.Invoice_Custom__c) {
+          try {
+            await this.update('Invoice__c', r.Invoice_Custom__c, { Status__c: 'Paid', Payment_Status__c: 'Paid' }, correlationId);
+          } catch (invErr) { log.warn({ err: invErr }, 'Could not update Invoice on delivery'); }
+        }
+        if (r.Order__c) {
+          try {
+            const allDispatches = await this.getDispatchRequests(context, r.Order__c, correlationId);
+            if (allDispatches.length > 0 && allDispatches.every((d) => d.status === 'Delivered')) {
+              await this.update('Order', r.Order__c, { Fulfillment_Status__c: 'Fully Fulfilled' }, correlationId);
+              log.info({ orderId: r.Order__c }, 'Order marked Fully Fulfilled');
+            }
+          } catch (orderErr) { log.warn({ err: orderErr }, 'Could not update Order on dispatch delivery'); }
+        }
+      }
+
+      return {
+        dispatchId: r.Id, dispatchName: r.Dispatch_Request_Name__c || r.Id,
+        orderId: r.Order__c, status: r.Status__c, invoiceId: r.Invoice_Custom__c,
+        startDate: r.Start_Date__c, endDate: r.End_Date__c,
+        sourceAddress: r.Source_Address__c, destinationAddress: r.Destination_Address__c,
+      };
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Dispatch status update failed', { userMessage: 'Unable to update dispatch status.' });
+    }
+  }
+
+  async getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN> {
+    try {
+      const result = await this.query<{ Id: string; Name: string; Status__c: string }>(
+        `SELECT Id, Name, Status__c FROM Goods_Receipt__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 1`,
+        correlationId,
+      );
+      if (result.records.length === 0) {
+        throw new SalesforceError('No GRN found for this secondary order', { userMessage: 'No GRN found for this secondary order.' });
+      }
+      const r = result.records[0];
+      return { grnId: r.Id, grnNumber: r.Name, secondaryOrderId, status: r.Status__c, items: [] };
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Secondary order GRN fetch failed', { userMessage: 'Unable to load GRN details.' });
+    }
+  }
 
   async getARSConfig(_context: ResolvedDistributorContext, correlationId?: string): Promise<ArsConfig> {
     const result = await this.query<{ MasterLabel: string; Default_Order_Status__c?: string; Include_In_Transit__c?: boolean; Enable_Debug_Mode__c?: boolean; SystemModstamp?: string }>(
@@ -1110,6 +1331,76 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getStockThresholdRecommendations(): Promise<AIStockRecommendation[]> { throw new SalesforceError('Stock threshold AI not available via REST API (BLK-009).'); }
   async getUpsellRecommendations(): Promise<AIUpsellRecommendation[]> { throw new SalesforceError('Upsell recommendations not available via REST API (BLK-009).'); }
   async applyStockThresholdRecommendation(): Promise<AIStockRecommendation> { throw new SalesforceError('AI recommendation application not available via REST API (BLK-009).'); }
+
+  // -- Secondary order private helpers --
+
+  private async getShippingAddress(accountId: string, correlationId?: string): Promise<string> {
+    try {
+      const result = await this.query<{ ShippingStreet?: string; ShippingCity?: string; ShippingState?: string; ShippingPostalCode?: string }>(
+        `SELECT ShippingStreet, ShippingCity, ShippingState, ShippingPostalCode FROM Account WHERE Id = '${escapeSoql(accountId)}' LIMIT 1`,
+        correlationId,
+      );
+      const r = result.records[0];
+      if (!r) return '';
+      return [r.ShippingStreet, r.ShippingCity, r.ShippingState, r.ShippingPostalCode].filter(Boolean).join(', ');
+    } catch { return ''; }
+  }
+
+  private async getProductInventory(
+    distributorId: string,
+    productIds: string[],
+    correlationId?: string,
+  ): Promise<Map<string, { qty: number; batches: Array<{ batchId: string; quantity: number; expiryDate?: string }> }>> {
+    const resultMap = new Map<string, { qty: number; batches: Array<{ batchId: string; quantity: number; expiryDate?: string }> }>();
+    if (productIds.length === 0) return resultMap;
+    const idList = productIds.map((id) => `'${escapeSoql(id)}'`).join(',');
+    const dEsc = escapeSoql(distributorId);
+
+    interface BatchRec { Id: string; Product__c: string; Quantity__c?: number; Available_Quantity__c?: number; Expiry_Date__c?: string }
+    let batchRecords: BatchRec[] = [];
+    let qtyKey: 'Quantity__c' | 'Available_Quantity__c' = 'Quantity__c';
+
+    try {
+      const r = await this.query<BatchRec>(
+        `SELECT Id, Product__c, Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) AND Status__c = 'Active' ORDER BY Expiry_Date__c ASC NULLS LAST`,
+        correlationId,
+      );
+      batchRecords = r.records;
+    } catch (firstErr) {
+      const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      if (msg.includes('INVALID_FIELD') || msg.includes('No such column')) {
+        try {
+          const r2 = await this.query<BatchRec>(
+            `SELECT Id, Product__c, Available_Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) ORDER BY Expiry_Date__c ASC NULLS LAST`,
+            correlationId,
+          );
+          batchRecords = r2.records;
+          qtyKey = 'Available_Quantity__c';
+        } catch { logger.warn('Could not query Inventory_Batch__c — availability will show as zero'); }
+      }
+    }
+
+    for (const b of batchRecords) {
+      const qty = ((b[qtyKey]) as number | undefined) || 0;
+      const existing = resultMap.get(b.Product__c) ?? { qty: 0, batches: [] };
+      existing.qty += qty;
+      existing.batches.push({ batchId: b.Id, quantity: qty, expiryDate: b.Expiry_Date__c });
+      resultMap.set(b.Product__c, existing);
+    }
+    return resultMap;
+  }
+
+  private async getFulfilledQtyByProduct(orderId: string, correlationId?: string): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    try {
+      const result = await this.query<{ Product__c: string; totalQty: number }>(
+        `SELECT Product__c, SUM(Quantity__c) totalQty FROM Invoice_Line_Item__c WHERE Invoice__r.Order__c = '${escapeSoql(orderId)}' GROUP BY Product__c`,
+        correlationId,
+      );
+      result.records.forEach((r) => map.set(r.Product__c, r.totalQty || 0));
+    } catch { /* Invoice_Line_Item__c fields uncertain — treat fulfilled as 0 */ }
+    return map;
+  }
 }
 
 function normalizeApiVersion(version: string): string {

@@ -1,11 +1,12 @@
 import { App } from '@slack/bolt';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { IdentityPipeline } from '../../identity/IdentityPipeline';
-import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrderQuote, GRNPayload, InvoicePayload, ArsConfig, ArsTriggeredOrder, BatchStockPolicy } from '../../salesforce/types';
+import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrderQuote, GRNPayload, ArsConfig, ArsTriggeredOrder, BatchStockPolicy } from '../../salesforce/types';
 import { getClientMode } from '../../salesforce/SalesforceClient';
 import { BLOCKERS } from '../../salesforce/blockers';
 import { InsightsService } from '../../services/InsightsService';
 import { ReportsService } from '../../services/ReportsService';
+import { PartialOrderReminderService } from '../../services/PartialOrderReminderService';
 import { buildReportDashboardBlocks } from '../blocks/reportBlocks';
 import { buildMainMenuBlocks, buildUserErrorBlocks, buildSection, buildHeader, buildDivider, buildButton, buildContext } from '../blocks/commonBlocks';
 import { buildDashboardView } from '../blocks/dashboardBlocks';
@@ -52,6 +53,7 @@ export function registerAllActions(
   pipeline: IdentityPipeline,
   sfClient: ISalesforceClient,
   insightsService: InsightsService,
+  reminderService: PartialOrderReminderService,
 ) {
   const reportsService = new ReportsService(sfClient);
 
@@ -700,16 +702,57 @@ export function registerAllActions(
 
   app.action(/^confirm_so_invoice_/, async ({ ack, body, respond, action }) => {
     await ack();
+    const orderId = (action as any).action_id.replace('confirm_so_invoice_', '');
+    const userId = body.user.id;
+    const idempotencyKey = `so-inv-${userId}-${orderId}`;
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
-      const orderId = (action as any).action_id.replace('confirm_so_invoice_', '');
-      const isPartial = (action as any).value === 'partial';
-      const idempotencyKey = `so-inv-${userId}-${orderId}-${Date.now()}`;
+      const { context: ctx } = await pipeline.resolve(userId);
+
+      const existing = checkIdempotency(idempotencyKey);
+      if (existing === 'processing') {
+        await safeRespond(body, respond, { text: 'Invoice creation is already in progress.' });
+        return;
+      }
+
+      const availability = await sfClient.getInventoryAvailability(ctx, orderId);
+      const invoiceItems = availability
+        .filter((a) => a.availableQuantity > 0)
+        .map((a) => ({ productId: a.productId, quantity: a.availableQuantity }));
+
+      if (invoiceItems.length === 0) {
+        await safeRespond(body, respond, { text: ':x: No stock available — invoice cannot be created.', replace_original: false });
+        return;
+      }
+
+      const isPartial = availability.some((a) => a.availableQuantity < a.orderedQuantity);
+
       markProcessing(idempotencyKey);
-      const invoice = await sfClient.createInvoice(ctx, orderId, { items: [], fullOrPartial: isPartial ? 'partial' : 'full', notes: '' });
+      const invoice = await sfClient.createInvoice(ctx, orderId, {
+        items: invoiceItems,
+        fullOrPartial: isPartial ? 'partial' : 'full',
+        notes: '',
+      });
       markCompleted(idempotencyKey, invoice);
-      await safeRespond(body, respond, { text: 'Invoice Created', blocks: buildInvoiceConfirmation(invoice), replace_original: false });
+
+      const dispatches = await sfClient.getDispatchRequests(ctx, orderId);
+
+      await safeRespond(body, respond, {
+        text: 'Invoice Created',
+        blocks: buildInvoiceConfirmation(invoice, dispatches),
+        replace_original: false,
+      });
+
+      if (isPartial) {
+        try {
+          const detail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
+          const pendingItemCount = availability.filter((a) => a.availableQuantity < a.orderedQuantity).length;
+          reminderService.register(orderId, userId, detail.orderNumber, detail.retailerCustomer, pendingItemCount);
+        } catch (reminderErr) {
+          logger.warn({ err: reminderErr, orderId }, 'Could not register partial order reminder');
+        }
+      }
     } catch (err) {
+      markFailed(idempotencyKey);
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
@@ -718,12 +761,44 @@ export function registerAllActions(
   app.action(/^so_dispatch_deliver_/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
       const orderId = (action as any).action_id.replace('so_dispatch_deliver_', '');
+
       const dispatches = await sfClient.getDispatchRequests(ctx, orderId);
-      if (dispatches.length === 0) { await safeRespond(body, respond, { text: 'No dispatch requests found for this order.' }); return; }
-      const updated = await sfClient.updateDispatchStatus(ctx, dispatches[0].dispatchId, 'Delivered');
-      await safeRespond(body, respond, { text: 'Dispatch Updated', blocks: [buildHeader(':white_check_mark: Delivery Confirmed'), buildSection(`Dispatch *${updated.dispatchName}* marked as *Delivered*.`)] });
+      if (dispatches.length === 0) {
+        await safeRespond(body, respond, { text: 'No dispatch requests found for this order.', replace_original: false });
+        return;
+      }
+
+      const pendingDispatch = dispatches.find((d) => d.status !== 'Delivered');
+      if (!pendingDispatch) {
+        await safeRespond(body, respond, { text: ':white_check_mark: All dispatches for this order are already marked as Delivered.', replace_original: false });
+        return;
+      }
+
+      await sfClient.updateDispatchStatus(ctx, pendingDispatch.dispatchId, 'Delivered');
+
+      const updatedDispatches = await sfClient.getDispatchRequests(ctx, orderId);
+      const remainingPending = updatedDispatches.filter((d) => d.status !== 'Delivered').length;
+
+      if (remainingPending === 0) {
+        reminderService.deregister(orderId);
+      }
+
+      const dispatchSummary = updatedDispatches.map((d) => `*${d.dispatchName}*: ${d.status}`).join('\n');
+      const blocks: any[] = [
+        buildHeader(':white_check_mark: Delivery Confirmed'),
+        buildSection(`Dispatch *${pendingDispatch.dispatchName}* marked as *Delivered*.\n\n*All dispatches:*\n${dispatchSummary}`),
+      ];
+      if (remainingPending > 0) {
+        blocks.push(buildSection(`:hourglass: ${remainingPending} dispatch(es) still pending.`));
+        blocks.push({ type: 'actions', elements: [buildButton(':package: Mark Next as Delivered', `so_dispatch_deliver_${orderId}`, orderId, 'primary')] });
+      } else {
+        blocks.push(buildSection(':tada: All dispatches delivered. Order fully fulfilled!'));
+      }
+
+      await safeRespond(body, respond, { text: 'Dispatch Updated', blocks, replace_original: false });
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });

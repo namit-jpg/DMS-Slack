@@ -17,7 +17,7 @@ async function main() {
 
   const sfClient = await initSalesforceClient();
 
-  const app = createApp(sfClient);
+  const { app, reminderService } = createApp(sfClient);
 
   const healthServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
     const diagnostics = {
@@ -42,6 +42,8 @@ async function main() {
     await app.start(env.PORT + 1 || 3001);
     logger.info(`Slack app started on port ${env.PORT + 1 || 3001}`);
   }
+
+  reminderService.start();
 
   const resolver = new DistributorResolver(sfClient);
   const poller = new SecondaryOrderPoller(sfClient, 5 * 60 * 1000);
@@ -69,6 +71,7 @@ async function main() {
 
   const shutdown = async () => {
     logger.info('Shutting down...');
+    reminderService.stop();
     poller.stop();
     await app.stop();
     process.exit(0);

@@ -1,4 +1,4 @@
-import { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, SecondaryOrderGRN, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
+import { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 
@@ -39,41 +39,109 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
 }
 
 export function buildSecondaryOrderDetail(detail: SecondaryOrderDetail): Block[] {
-  const blocks: Block[] = [buildHeader(`:twisted_rightwards_arrows: SO ${detail.orderNumber}`), buildSection(`*Retailer:* ${detail.retailerCustomer}\n*Status:* ${detail.status}\n*Invoice:* ${detail.invoiceStatus}\n*Dispatch:* ${detail.dispatchStatus}\n*Fulfillment:* ${detail.fulfillmentStatus}\n*Amount:* Rs ${detail.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`), buildDivider(), buildSection(`*From:* ${detail.sourceAddress}\n*To:* ${detail.destinationAddress}${detail.requestedDeliveryDate ? `\n*Requested Delivery:* ${detail.requestedDeliveryDate}` : ''}`), buildDivider(), buildSection(`*Products (${detail.items.length})*`)];
-  detail.items.forEach((li) => blocks.push(buildSection(`*${li.productName}* \u2014 Ord: ${li.orderedQuantity} | Avail: ${li.availableQuantity} | Fulfilled: ${li.fulfilledQuantity} | Pending: ${li.pendingQuantity}`)));
+  const fulfillEmoji = ['Fully Invoiced', 'Fully Fulfilled'].includes(detail.fulfillmentStatus) ? ':white_check_mark:'
+    : ['Partially Fulfilled', 'Partially Invoiced'].includes(detail.fulfillmentStatus) ? ':warning:'
+    : ':clock3:';
+
+  const blocks: Block[] = [
+    buildHeader(`:twisted_rightwards_arrows: SO ${detail.orderNumber}`),
+    buildSection(`*Retailer:* ${detail.retailerCustomer}\n*Status:* ${detail.status}\n*Invoice:* ${detail.invoiceStatus}\n*Dispatch:* ${detail.dispatchStatus}\n${fulfillEmoji} *Fulfillment:* ${detail.fulfillmentStatus}\n*Amount:* Rs ${detail.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildDivider(),
+    buildSection(`*From:* ${detail.sourceAddress || 'Distributor Warehouse'}\n*To:* ${detail.destinationAddress || 'Retailer Address'}${detail.requestedDeliveryDate ? `\n*Requested Delivery:* ${detail.requestedDeliveryDate}` : ''}`),
+    buildDivider(),
+    buildSection(`*Products (${detail.items.length})*`),
+  ];
+
+  detail.items.forEach((li) => {
+    const pct = li.orderedQuantity > 0 ? Math.round((li.fulfilledQuantity / li.orderedQuantity) * 100) : 0;
+    const itemEmoji = li.pendingQuantity === 0 ? ':white_check_mark:' : pct > 0 ? ':warning:' : ':clock3:';
+    blocks.push(buildSection(
+      `${itemEmoji} *${li.productName}*\nOrdered: ${li.orderedQuantity} | Fulfilled: ${li.fulfilledQuantity} | *Pending: ${li.pendingQuantity}*`,
+    ));
+  });
+
   blocks.push(buildDivider());
   const actions: any[] = [];
   if (detail.canCreateInvoice) actions.push(buildButton(':receipt: Process Invoice', `process_so_invoice_${detail.orderId}`, detail.orderId, 'primary'));
-  if (detail.canUpdateDispatch && detail.dispatchStatus === 'Pending') actions.push(buildButton(':truck: Mark Delivered', `so_dispatch_deliver_${detail.orderId}`, detail.orderId));
+  if (detail.canUpdateDispatch && !['Fully Fulfilled', 'Delivered'].includes(detail.dispatchStatus)) {
+    actions.push(buildButton(':truck: Mark Delivered', `so_dispatch_deliver_${detail.orderId}`, detail.orderId));
+  }
   if (actions.length > 0) blocks.push({ type: 'actions', elements: actions });
   blocks.push({ type: 'actions', elements: [
     buildButton(':twisted_rightwards_arrows: Back to Secondary', 'secondary_orders_menu', 'secondary'),
     buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary'),
-  ] });
+  ]});
   return blocks;
 }
 
 export function buildInvoiceProcessing(orderId: string, availability: InventoryAvailability[]): Block[] {
-  const blocks: Block[] = [buildHeader(':receipt: Process Invoice for ' + orderId), buildSection('Stock availability for this order:'), buildDivider()];
+  const blocks: Block[] = [buildHeader(':receipt: Process Invoice'), buildSection('Available inventory for pending quantities:'), buildDivider()];
   let canFulfillAll = true;
+  let totalToInvoice = 0;
+  let totalPending = 0;
+
   availability.forEach((a, idx) => {
-    const shortfall = a.orderedQuantity > a.availableQuantity;
+    totalPending += a.orderedQuantity; // orderedQuantity = pendingQty in this context
+    totalToInvoice += a.availableQuantity;
+    const shortfall = a.availableQuantity < a.orderedQuantity;
     if (shortfall) canFulfillAll = false;
-    blocks.push(buildSection(`*${idx + 1}. ${a.productName}*\nOrdered: ${a.orderedQuantity} | Available: ${a.availableQuantity} | ${shortfall ? `:warning: Shortfall: ${a.orderedQuantity - a.availableQuantity}` : ':white_check_mark: Can fulfill'}`));
-    a.batchDetails.forEach((b) => blocks.push(buildSection(`  _Batch ${b.batchId.slice(-4)}: ${b.quantity} units${b.expiryDate ? ` (Expires: ${b.expiryDate})` : ''}_`)));
+    const statusText = shortfall
+      ? `:warning: Shortfall: ${a.orderedQuantity - a.availableQuantity}`
+      : ':white_check_mark: Fully available';
+    blocks.push(buildSection(`*${idx + 1}. ${a.productName}*\nPending: ${a.orderedQuantity} | In Stock: ${a.availableQuantity} | To Invoice: *${a.availableQuantity}* \u2014 ${statusText}`));
+    a.batchDetails.filter((b) => b.quantity > 0).forEach((b) => {
+      blocks.push(buildSection(`  _Batch \u2026${b.batchId.slice(-4)}: ${b.quantity} units${b.expiryDate ? ` (exp. ${b.expiryDate})` : ''}_`));
+    });
   });
+
   blocks.push(buildDivider());
-  blocks.push(buildSection(canFulfillAll ? ':white_check_mark: *Full invoice will be created*' : ':warning: *Partial invoice will be created* (pending: pending quantities)'));
-  blocks.push({ type: 'actions', elements: [
-    buildButton(':white_check_mark: Confirm Invoice', `confirm_so_invoice_${orderId}`, canFulfillAll ? 'full' : 'partial', 'primary'),
-    buildButton(':twisted_rightwards_arrows: Back to Order', `view_so_detail_${orderId}`, orderId),
-    buildButton(':arrow_left: Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
-  ] });
+  if (totalToInvoice === 0) {
+    blocks.push(buildSection(':x: *No stock available* \u2014 cannot process invoice at this time.'));
+    blocks.push({ type: 'actions', elements: [
+      buildButton(':twisted_rightwards_arrows: Back to Order', `view_so_detail_${orderId}`, orderId),
+      buildButton(':arrow_left: Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
+    ]});
+  } else {
+    blocks.push(buildSection(canFulfillAll
+      ? ':white_check_mark: *Full invoice will be created* \u2014 all pending quantities available'
+      : `:warning: *Partial invoice: ${totalToInvoice} of ${totalPending} units available*`));
+    blocks.push({ type: 'actions', elements: [
+      buildButton(':white_check_mark: Confirm Invoice', `confirm_so_invoice_${orderId}`, canFulfillAll ? 'full' : 'partial', 'primary'),
+      buildButton(':twisted_rightwards_arrows: Back to Order', `view_so_detail_${orderId}`, orderId),
+      buildButton(':arrow_left: Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back'),
+    ]});
+  }
   return blocks;
 }
 
-export function buildInvoiceConfirmation(invoice: DMSInvoice): Block[] {
-  return [buildHeader(':white_check_mark: Invoice Generated'), buildSection(`*Invoice:* ${invoice.invoiceNumber}\n*Type:* ${invoice.fullPartial === 'partial' ? 'Partial' : 'Full'}\n*Status:* ${invoice.status}\n*Amount:* Rs ${(invoice.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
+export function buildInvoiceConfirmation(invoice: DMSInvoice, dispatches: DispatchRequest[] = []): Block[] {
+  const typeLabel = invoice.fullPartial === 'partial' ? ':warning: Partial Invoice' : ':white_check_mark: Full Invoice';
+  const blocks: Block[] = [
+    buildHeader(':white_check_mark: Invoice Generated'),
+    buildSection(`*Invoice:* ${invoice.invoiceNumber}\n*Type:* ${typeLabel}\n*Status:* ${invoice.status}\n*Amount:* Rs ${(invoice.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildDivider(),
+  ];
+
+  if (dispatches.length > 0) {
+    const d = dispatches[0];
+    blocks.push(buildSection(`:truck: *Dispatch Created:* ${d.dispatchName}\nStatus: *${d.status}*\nFrom: ${d.sourceAddress || 'Distributor Warehouse'}\nTo: ${d.destinationAddress || 'Retailer'}`));
+    if (invoice.fullPartial === 'partial') {
+      blocks.push(buildContext([':information_source: Partial invoice \u2014 process remaining quantities when stock is available.']));
+    }
+    blocks.push(buildDivider());
+    const pendingDispatch = dispatches.find((dp) => dp.status !== 'Delivered');
+    if (pendingDispatch && invoice.orderId) {
+      blocks.push({ type: 'actions', elements: [
+        buildButton(':truck: Mark as Delivered', `so_dispatch_deliver_${invoice.orderId}`, invoice.orderId, 'primary'),
+        buildButton(':twisted_rightwards_arrows: View Order', `view_so_detail_${invoice.orderId}`, invoice.orderId!),
+      ]});
+    }
+  } else {
+    blocks.push(buildSection(':information_source: Dispatch request will be created automatically. Check back in the order detail.'));
+  }
+
+  blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
+  return blocks;
 }
 
 export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[] {

@@ -6,12 +6,13 @@ import { DistributorResolver } from './identity/DistributorResolver';
 import { AuthorizationService } from './identity/AuthorizationService';
 import { IdentityPipeline } from './identity/IdentityPipeline';
 import { InsightsService } from './services/InsightsService';
+import { PartialOrderReminderService } from './services/PartialOrderReminderService';
 import { registerDmsCommand } from './slack/commands/dmsCommand';
 import { registerAppHome } from './slack/appHome/publishHome';
 import { registerAllActions } from './slack/actions/router';
 import { createChildLogger } from './utils/logger';
 
-export function createApp(sfClient: ISalesforceClient): App {
+export function createApp(sfClient: ISalesforceClient): { app: App; reminderService: PartialOrderReminderService } {
   const appLogger = createChildLogger('App');
 
   const distributorResolver = new DistributorResolver(sfClient);
@@ -38,13 +39,15 @@ export function createApp(sfClient: ISalesforceClient): App {
   const identityService = new SlackIdentityService(app);
   const pipeline = new IdentityPipeline(identityService, distributorResolver, authService);
 
+  const reminderService = new PartialOrderReminderService(app.client.chat as any);
+
   registerDmsCommand(app, pipeline, insightsService);
   registerAppHome(app, pipeline, insightsService);
-  registerAllActions(app, pipeline, sfClient, insightsService);
+  registerAllActions(app, pipeline, sfClient, insightsService, reminderService);
 
   appLogger.info('DMS/SFA Slack App initialized');
   appLogger.info(`Salesforce client mode: ${sfClient.isMock() ? 'MOCK' : 'LIVE'}`);
   appLogger.info(`Slack mode: ${env.SLACK_SOCKET_MODE ? 'Socket Mode' : 'HTTP Receiver'}`);
 
-  return app;
+  return { app, reminderService };
 }
