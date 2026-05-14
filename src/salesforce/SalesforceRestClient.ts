@@ -710,7 +710,6 @@ export class SalesforceRestClient implements ISalesforceClient {
       const grnHeaderId = await this.create('GRN__c', {
         Order__c: orderId,
         Status__c: overallStatus,
-        Notes__c: grnData.notes || '',
       }, correlationId);
 
       // Create GRN_Line__c child records — one per product
@@ -777,10 +776,10 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getGRNDetails(_context: ResolvedDistributorContext, grnId: string, correlationId?: string): Promise<GRNResult> {
     try {
-      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number; Notes__c: string }>('GRN__c', grnId, undefined, correlationId);
+      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number }>('GRN__c', grnId, undefined, correlationId);
       return {
         grnId: r.Id, grnNumber: r.Name, orderId: r.Order__c || '',
-        status: r.Status__c, items: [], notes: r.Notes__c || '',
+        status: r.Status__c, items: [], notes: '',
       };
     } catch (err) {
       throw new SalesforceError('GRN details fetch failed', { userMessage: 'Unable to load GRN details.' });
@@ -929,8 +928,8 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<SecondaryOrder[]> {
     try {
       const escapedId = escapeSoql(context.salesforceAccountId);
-      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string; Fulfillment_Status__c?: string }>(
-        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type, Fulfillment_Status__c FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`,
+      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(
+        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`,
         correlationId,
       )).records;
       const missingIds = [...new Set(records.filter((r) => !r.Retailer_Account__r?.Name && r.Retailer_Account__c).map((r) => r.Retailer_Account__c as string))];
@@ -943,7 +942,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         } catch { /* best effort */ }
       }
       return records.map((r) => {
-        const fulfillmentStatus = r.Fulfillment_Status__c || r.Status;
+        const fulfillmentStatus = r.Status;
         return {
           orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
           retailerCustomer: r.Retailer_Account__r?.Name || nameMap.get(r.Retailer_Account__c || '') || r.Retailer_Account__c || 'Unknown Retailer',
@@ -958,15 +957,15 @@ export class SalesforceRestClient implements ISalesforceClient {
     try {
       const escapedId = escapeSoql(secondaryOrderId);
       const escapedAccountId = escapeSoql(context.salesforceAccountId);
-      const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Fulfillment_Status__c?: string }>(
-        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Fulfillment_Status__c FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
+      const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
+        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
         correlationId,
       );
       if (result.records.length === 0) {
         throw new SalesforceError('Secondary order not found', { userMessage: 'Unable to load this secondary order.' });
       }
       const r = result.records[0];
-      const fulfillmentStatus = r.Fulfillment_Status__c || r.Status || 'Unknown';
+      const fulfillmentStatus = r.Status || 'Unknown';
       const isFullyFulfilled = ['Fully Invoiced', 'Fully Fulfilled'].includes(fulfillmentStatus);
 
       const [orderItems, invoiceIds, dispatchIds, grnIds, fulfilledMap, sourceAddress] = await Promise.all([
@@ -1134,16 +1133,16 @@ export class SalesforceRestClient implements ISalesforceClient {
         log.warn({ err: dispatchErr }, 'Dispatch creation failed — invoice still created');
       }
 
-      // 5. Update Order Fulfillment_Status__c
+      // 5. Update Order Sub_Status__c
       try {
         const fulfilledMap = await this.getFulfilledQtyByProduct(orderId, correlationId);
         invoiceItems.forEach((i) => fulfilledMap.set(i.productId, (fulfilledMap.get(i.productId) || 0) + i.quantity));
         const allFulfilled = orderItems.every((oi) => (fulfilledMap.get(oi.productId) || 0) >= oi.quantity);
         const newStatus = allFulfilled ? 'Fully Invoiced' : 'Partially Fulfilled';
-        await this.update('Order', orderId, { Fulfillment_Status__c: newStatus }, correlationId);
-        log.info({ orderId, newStatus }, 'Order Fulfillment_Status__c updated');
+        await this.update('Order', orderId, { Sub_Status__c: newStatus }, correlationId);
+        log.info({ orderId, newStatus }, 'Order Sub_Status__c updated');
       } catch (statusErr) {
-        log.warn({ err: statusErr }, 'Could not update Order Fulfillment_Status__c');
+        log.warn({ err: statusErr }, 'Could not update Order Sub_Status__c');
       }
 
       return {
@@ -1208,7 +1207,7 @@ export class SalesforceRestClient implements ISalesforceClient {
           try {
             const allDispatches = await this.getDispatchRequests(context, r.Order__c, correlationId);
             if (allDispatches.length > 0 && allDispatches.every((d) => d.status === 'Delivered')) {
-              await this.update('Order', r.Order__c, { Fulfillment_Status__c: 'Fully Fulfilled' }, correlationId);
+              await this.update('Order', r.Order__c, { Sub_Status__c: 'Fully Fulfilled' }, correlationId);
               log.info({ orderId: r.Order__c }, 'Order marked Fully Fulfilled');
             }
           } catch (orderErr) { log.warn({ err: orderErr }, 'Could not update Order on dispatch delivery'); }

@@ -15,7 +15,12 @@
       "Bash(node -e ' *)",
       "Bash(npm test *)",
       "Bash(gcloud config *)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\namit\\\\Documents\\\\DMSFA\" -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(grep -E \"\\\\.\\(ts|js|json\\)$\")",
+      "Bash(git -C \"C:\\\\Users\\\\namit\\\\Documents\\\\DMSFA\" log --oneline -n 10)",
+      "Bash(npx vitest *)"
     ]
   }
 }
