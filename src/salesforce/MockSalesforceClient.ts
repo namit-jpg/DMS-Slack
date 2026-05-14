@@ -477,6 +477,13 @@ export class MockSalesforceClient implements ISalesforceClient {
     return [{ orderId: 'arsPO001', orderNumber: 'ARS-PO-2026-0001', productId: '01tMOCK000000002', productName: 'Snack Box B', quantity: 30, reason: 'Stock below minimum threshold', minThreshold: 10, maxThreshold: 40, currentStock: 8, status: 'Approved', triggerDate: '2026-05-02' }];
   }
 
+  async applyARSPolicyChanges(
+    _accountId: string,
+    _changes: Array<{ productId: string; newMin: number; newMax: number }>,
+  ): Promise<void> {
+    // no-op in mock mode
+  }
+
   async getBusinessInsightsEnhanced(_ctx: ResolvedDistributorContext): Promise<AIBusinessInsight[]> {
     return [
       { insightId: 'ai001', type: 'performance', title: 'Monthly Sales Growth', description: 'Your distributor sales have grown 15.5% MoM driven by Beverage and Oil categories.', metric: '15.5%', metricValue: 15.5, generatedAt: new Date().toISOString(), actionable: false },

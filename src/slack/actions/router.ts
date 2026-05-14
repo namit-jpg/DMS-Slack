@@ -145,14 +145,13 @@ export function registerAllActions(
       const productId = (action as any).action_id.replace('add_product_', '');
       const state = orderBuilders.get(userId) || { selected: [] };
       state.selected = hydrateSelectedFromSlackState(state.selected, body);
+      const products = await sfClient.getAvailableProducts(ctx);
       const existing = state.selected.find((s) => s.productId === productId);
       if (!existing) {
-        const products = await sfClient.getAvailableProducts(ctx);
         const product = products.find((p) => p.productId === productId);
         state.selected.push({ productId, quantity: Math.max(1, product?.minOrderQtyPrimary || 1), schemeDiscount: 0 });
       }
       orderBuilders.set(userId, state);
-      const products = await sfClient.getAvailableProducts(ctx);
       const blocks = buildProductSelectionModal(products, state.selected);
       await safeRespond(body, respond, { text: 'Create Primary Order', blocks, replace_original: true });
     } catch (err) {
@@ -324,8 +323,12 @@ export function registerAllActions(
       }
       payload.notes = grnState.grn_notes?.grn_input_notes?.value || '';
 
-      const idempotencyKey = `grn-create-${userId}-${orderId}-${Date.now()}`;
-      checkIdempotency(idempotencyKey);
+      const idempotencyKey = `grn-create-${userId}-${orderId}`;
+      const grnExisting = checkIdempotency(idempotencyKey);
+      if (grnExisting === 'processing') {
+        await safeRespond(body, respond, { text: 'GRN submission is already in progress.' });
+        return;
+      }
       markProcessing(idempotencyKey);
       const grn = await sfClient.createOrUpdateGRN(ctx, orderId, payload);
       markCompleted(idempotencyKey, grn);
@@ -345,7 +348,10 @@ export function registerAllActions(
       const returns = await sfClient.getReturnOrders(ctx);
       const blocks = buildReturnOrderListBlocks(returns);
       await safeRespond(body, respond, { text: 'Returns', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('claims_menu', async ({ ack, body, respond }) => {
@@ -358,7 +364,10 @@ export function registerAllActions(
       claims.slice(0, 10).forEach((c: any) => blocks.push(buildSection('*' + c.claimNumber + '* — ' + c.claimType + '\nStatus: ' + c.status + ' | Amount: Rs ' + (c.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }))));
       blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
       await safeRespond(body, respond, { text: 'Claims', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('bulk_secondary_invoice', async ({ ack, body, respond }) => {
@@ -385,7 +394,10 @@ export function registerAllActions(
         });
       }
       await safeRespond(body, respond, { text: 'Bulk Secondary Invoice', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('returns_claims_menu', async ({ ack, body, respond }) => {
@@ -422,15 +434,21 @@ export function registerAllActions(
 
   app.action(/^upload_return_file_/, async ({ ack, body, respond, action }) => {
     await ack();
-    try { const userId = body.user.id; await pipeline.resolve(userId);
+    try {
+      const userId = body.user.id;
+      await pipeline.resolve(userId);
       await safeRespond(body, respond, { text: ':package: File upload — please attach your file as a Slack message in this thread. We will add direct file upload support soon.', replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^submit_return_approval_/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
-      const userId = body.user.id; const { identity, context: ctx } = await pipeline.resolve(userId);
+      const userId = body.user.id;
+      const { identity, context: ctx } = await pipeline.resolve(userId);
       const returnOrderId = (action as any).action_id.replace('submit_return_approval_', '');
       const detail = await sfClient.getReturnOrderDetails(ctx, returnOrderId);
       const approvalBlocks = [buildHeader(':envelope: Return Order Approval Request'), buildSection(`*Return:* ${detail.returnNumber}\n*Amount:* Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n*Type:* ${detail.type || 'N/A'}\n*Requested by:* ${identity.displayName}`), buildSection(':warning: Please review and approve/reject this return order to generate a credit note.')];
@@ -441,7 +459,10 @@ export function registerAllActions(
       } catch (channelErr: any) { logger.warn({ err: channelErr }, 'Return approval post failed');
         await safeRespond(body, respond, { text: `:white_check_mark: Approval request recorded for ${detail.returnNumber}.`, replace_original: false });
       }
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^file_claim_/, async ({ ack, body, respond, action }) => {
@@ -467,8 +488,12 @@ export function registerAllActions(
       const amount = parseFloat(values.claim_amount?.claim_input_amount?.value || '0') || 0;
       const desc = values.claim_desc?.claim_input_desc?.value || '';
 
-      const idempotencyKey = `claim-create-${userId}-${returnOrderId}-${Date.now()}`;
-      checkIdempotency(idempotencyKey);
+      const idempotencyKey = `claim-create-${userId}-${returnOrderId}`;
+      const claimExisting = checkIdempotency(idempotencyKey);
+      if (claimExisting === 'processing') {
+        await safeRespond(body, respond, { text: 'Claim submission is already in progress.' });
+        return;
+      }
       markProcessing(idempotencyKey);
       const claim = await sfClient.createOrUpdateClaim(ctx, { returnOrderId, claimType, amount, description: desc });
       markCompleted(idempotencyKey, claim);
@@ -569,7 +594,10 @@ export function registerAllActions(
       const orders = await sfClient.getSecondaryOrders(ctx);
       const blocks = buildSecondaryOrderList(orders);
       await safeRespond(body, respond, { text: 'Secondary Orders', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('search_so_button', async ({ ack, body, respond }) => {
@@ -582,7 +610,10 @@ export function registerAllActions(
       const orders = await sfClient.getSecondaryOrders(ctx);
       const blocks = buildSecondaryOrderList(orders, searchTerm);
       await safeRespond(body, respond, { text: `Secondary orders matching "${searchTerm}"`, blocks, replace_original: true });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^view_so_detail_/, async ({ ack, body, respond, action }) => {
@@ -592,7 +623,10 @@ export function registerAllActions(
       const orderId = (action as any).action_id.replace('view_so_detail_', '');
       const detail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
       await safeRespond(body, respond, { text: `SO ${detail.orderNumber}`, blocks: buildSecondaryOrderDetail(detail), replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^process_so_invoice_/, async ({ ack, body, respond, action }) => {
@@ -618,7 +652,10 @@ export function registerAllActions(
       }
 
       await safeRespond(body, respond, { text: 'Process Invoice', blocks: buildInvoiceProcessing(orderId, availability), replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^confirm_so_invoice_/, async ({ ack, body, respond, action }) => {
@@ -632,7 +669,10 @@ export function registerAllActions(
       const invoice = await sfClient.createInvoice(ctx, orderId, { items: [], fullOrPartial: isPartial ? 'partial' : 'full', notes: '' });
       markCompleted(idempotencyKey, invoice);
       await safeRespond(body, respond, { text: 'Invoice Created', blocks: buildInvoiceConfirmation(invoice), replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^so_dispatch_deliver_/, async ({ ack, body, respond, action }) => {
@@ -644,7 +684,10 @@ export function registerAllActions(
       if (dispatches.length === 0) { await safeRespond(body, respond, { text: 'No dispatch requests found for this order.' }); return; }
       const updated = await sfClient.updateDispatchStatus(ctx, dispatches[0].dispatchId, 'Delivered');
       await safeRespond(body, respond, { text: 'Dispatch Updated', blocks: [buildHeader(':white_check_mark: Delivery Confirmed'), buildSection(`Dispatch *${updated.dispatchName}* marked as *Delivered*.`)] });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('view_inventory', async ({ ack, body, respond }) => {
@@ -660,7 +703,10 @@ export function registerAllActions(
       }));
       const blocks = buildEnhancedInventoryView(products);
       await safeRespond(body, respond, { text: 'Inventory Visibility', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^replenish_order_/, async ({ ack, body, respond, action }) => {
@@ -678,7 +724,10 @@ export function registerAllActions(
         { type: 'actions', elements: [buildButton(':pencil: Create Primary Order', SLACK_ACTION_IDS.SELECT_ORDER_TYPE, 'create', 'primary'), buildButton(':arrow_left: Back to Inventory', 'view_inventory', 'back')] },
       ];
       await safeRespond(body, respond, { text: 'Replenishment Order', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('view_partial_orders', async ({ ack, body, respond }) => {
@@ -700,39 +749,54 @@ export function registerAllActions(
       }
       blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
       await safeRespond(body, respond, { text: 'Partially Fulfilled Orders', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('ars_menu', async ({ ack, body, respond }) => {
     await ack();
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
       let batches: BatchStockPolicy[] = [];
+      let resolvedConfig: ArsConfig;
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-      const resolvedConfig: ArsConfig = {
-        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
-        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
-      };
+      try {
+        resolvedConfig = await sfClient.getARSConfig(ctx);
+      } catch {
+        resolvedConfig = { autoReplenishmentEnabled: false, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false }, minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A' };
+      }
       const blocks = buildARSDashboard(resolvedConfig, batches);
       await safeRespond(body, respond, { text: 'ARS Dashboard', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('ars_search_button', async ({ ack, body, respond }) => {
     await ack();
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
       const stateValues = (body as any).view?.state?.values || (body as any).state?.values || {};
       const searchTerm = (stateValues.ars_search_block?.ars_search_input?.value || '').trim().toLowerCase();
       let batches: BatchStockPolicy[] = [];
+      let resolvedConfig: ArsConfig;
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-      const resolvedConfig: ArsConfig = {
-        autoReplenishmentEnabled: true, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
-        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
-      };
+      try {
+        resolvedConfig = await sfClient.getARSConfig(ctx);
+      } catch {
+        resolvedConfig = { autoReplenishmentEnabled: false, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false }, minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A' };
+      }
       const blocks = buildARSDashboard(resolvedConfig, batches, searchTerm);
       await safeRespond(body, respond, { text: `ARS: "${searchTerm}"`, blocks, replace_original: true });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_edit_product_/, async ({ ack, body, respond, action }) => {
@@ -743,7 +807,10 @@ export function registerAllActions(
       const info = typeof value === 'string' ? JSON.parse(value) : value;
       const blocks = buildARSEditProduct(info);
       await safeRespond(body, respond, { text: `Edit ARS — ${info.productName}`, blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_submit_product_/, async ({ ack, body, respond, action }) => {
@@ -797,24 +864,34 @@ export function registerAllActions(
         } catch { /* DM may also fail */ }
         await safeRespond(body, respond, { text: `:white_check_mark: ARS change request sent. Could not reach #${salesChannelRaw} — check bot is in the channel with post permissions.`, replace_original: false });
       }
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('ars_toggle_status', async ({ ack, body, respond, action }) => {
     await ack();
     try {
-      const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
       const activate = (action as any).value === 'activate';
       try { await sfClient.updateARSStatus(ctx, activate); } catch { /* BLK-008 in real mode */ }
       let batches: BatchStockPolicy[] = [];
+      let config: ArsConfig;
       try { batches = await sfClient.getBatchWiseStockPolicies(ctx); } catch { /* may fail */ }
-      const config: ArsConfig = {
-        autoReplenishmentEnabled: activate, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false },
-        minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'weekly', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A',
-      };
+      try {
+        config = await sfClient.getARSConfig(ctx);
+        config.autoReplenishmentEnabled = activate;
+      } catch {
+        config = { autoReplenishmentEnabled: activate, activeProducts: { productId: '', productName: '', currentStock: 0, minThreshold: 0, maxThreshold: 0, reorderPoint: 0, reorderQuantity: 0, isActive: false }, minThreshold: 0, maxThreshold: 0, replenishmentFrequency: 'N/A', lastModifiedBy: 'N/A', lastModifiedDate: 'N/A' };
+      }
       const blocks = buildARSDashboard(config, batches);
       await safeRespond(body, respond, { text: `ARS ${activate ? 'activated' : 'deactivated'}`, blocks, replace_original: true });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_request_change_/, async ({ ack, body, respond, action }) => {
@@ -824,7 +901,10 @@ export function registerAllActions(
       const info = typeof value === 'string' ? JSON.parse(value) : value;
       const blocks = buildARSChangeRequestForm(info);
       await safeRespond(body, respond, { text: `Request ARS Change — ${info.productName}`, blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_submit_change_request_/, async ({ ack, body, respond, action }) => {
@@ -859,7 +939,10 @@ export function registerAllActions(
         } catch { /* DM may also fail — messages_tab_disabled */ }
         await safeRespond(body, respond, { text: `:white_check_mark: Change request recorded for ${info.productName}. Could not deliver to #${salesChannelRaw}. Reason: ${reason}`, replace_original: false });
       }
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('ars_view_orders', async ({ ack, body, respond }) => {
@@ -870,21 +953,26 @@ export function registerAllActions(
       try { orders = await sfClient.getARSTriggeredOrders(ctx); } catch { /* may fail */ }
       const blocks = buildARSOrdersList(orders);
       await safeRespond(body, respond, { text: 'ARS Orders', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_create_order_/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
       const userId = body.user.id;
-      await pipeline.resolve(userId);
+      const { context: ctx } = await pipeline.resolve(userId);
       const productId = (action as any).action_id.replace('ars_create_order_', '');
       orderBuilders.set(userId, { selected: [{ productId, quantity: 1 }] });
-      const ctx = await pipeline.resolve(userId).then((r) => r.context);
       const products = await sfClient.getAvailableProducts(ctx);
       const blocks = buildProductSelectionModal(products, [{ productId, quantity: 1 }]);
       await safeRespond(body, respond, { text: 'Create Primary Order', blocks, replace_original: false });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('inventory_select_location', async ({ ack, body, respond, action }) => {
@@ -902,7 +990,10 @@ export function registerAllActions(
       const effectiveLocation = selectedLocation === '__all__' ? undefined : selectedLocation;
       const blocks = buildEnhancedInventoryView(products, effectiveLocation);
       await safeRespond(body, respond, { text: 'Inventory Visibility', blocks, replace_original: true });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action(/^ars_deactivate_product_/, async ({ ack, body, respond, action }) => {
@@ -916,7 +1007,10 @@ export function registerAllActions(
         text: `:x: ARS deactivated for *${info.productName}*. Batches for this product have been marked as inactive.`,
         replace_original: false,
       });
-    } catch (err) { const { userMessage } = pipeline.resolveUserFacingMessage(err); await safeRespond(body, respond, { text: userMessage, replace_original: false }); }
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
   });
 
   app.action('ars_approve_changes', async ({ ack, body, respond }) => {
@@ -928,28 +1022,10 @@ export function registerAllActions(
     }
     const pending = pendingARSChanges.get(messageTs)!;
     try {
-      const escapedAccountId = pending.accountId.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
-      for (const change of pending.changes) {
-        const escapedProductId = (change.productId || '').replace(/'/g, "\\'").replace(/\\/g, '\\\\');
-        try {
-          const batches = await sfClient.query<{ Id: string }>(
-            `SELECT Id FROM Inventory_Batch__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 5`,
-          );
-          for (const batch of batches.records) {
-            await sfClient.update('Inventory_Batch__c', batch.Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax });
-          }
-        } catch (sfErr: any) {
-          logger.warn({ err: sfErr, productId: change.productId }, 'Could not update Inventory_Batch__c, trying Inventory_Policy__c');
-          try {
-            const policyQuery = await sfClient.query<{ Id: string }>(
-              `SELECT Id FROM Inventory_Policy__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 1`,
-            );
-            if (policyQuery.records.length > 0) {
-              await sfClient.update('Inventory_Policy__c', policyQuery.records[0].Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax });
-            }
-          } catch { /* Inventory_Policy__c may not exist */ }
-        }
-      }
+      await sfClient.applyARSPolicyChanges(
+        pending.accountId,
+        pending.changes.map((c) => ({ productId: c.productId, newMin: c.newMin, newMax: c.newMax })),
+      );
       const blocks = buildARSApprovalAcknowledgement(true, pending.userName);
       await app.client.chat.postMessage({ channel: pending.channelId, thread_ts: pending.messageTs, text: ':white_check_mark: ARS settings approved and applied.', blocks });
       pendingARSChanges.delete(messageTs);
@@ -1020,10 +1096,6 @@ export function registerAllActions(
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
     }
   });
-}
-
-function buildBackToMenuButton(): any {
-  return buildButton(':arrow_left: Back to Menu', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary');
 }
 
 function buildEmptyDashboardMetrics() {

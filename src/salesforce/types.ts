@@ -190,6 +190,11 @@ export interface ISalesforceClient {
   updateARSStatus(context: ResolvedDistributorContext, active: boolean, correlationId?: string): Promise<ArsConfig>;
   getBatchWiseStockPolicies(context: ResolvedDistributorContext, correlationId?: string): Promise<BatchStockPolicy[]>;
   getARSTriggeredOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<ArsTriggeredOrder[]>;
+  applyARSPolicyChanges(
+    accountId: string,
+    changes: Array<{ productId: string; newMin: number; newMax: number }>,
+    correlationId?: string,
+  ): Promise<void>;
 
   // AI Insights
   getBusinessInsightsEnhanced(context: ResolvedDistributorContext, correlationId?: string): Promise<AIBusinessInsight[]>;

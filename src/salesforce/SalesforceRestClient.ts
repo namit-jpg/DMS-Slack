@@ -41,6 +41,19 @@ import { SalesforceError } from '../utils/errors';
 
 const logger = createChildLogger('SalesforceRestClient');
 
+const DEFAULT_API_VERSION = '66.0';
+const FETCH_TIMEOUT_MS = 8_000;
+
+async function sfFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class SalesforceRestClient implements ISalesforceClient {
   private auth: SalesforceAuth;
   private apiVersion: string;
@@ -48,12 +61,12 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   constructor(auth: SalesforceAuth) {
     this.auth = auth;
-    this.apiVersion = normalizeApiVersion(process.env.SALESFORCE_API_VERSION || '62.0');
+    this.apiVersion = normalizeApiVersion(process.env.SALESFORCE_API_VERSION || DEFAULT_API_VERSION);
   }
 
   setCliToken(token: { accessToken: string; instanceUrl: string }): void {
     this.cliToken = token;
-    this.apiVersion = normalizeApiVersion(process.env.SALESFORCE_API_VERSION || '66.0');
+    this.apiVersion = normalizeApiVersion(process.env.SALESFORCE_API_VERSION || DEFAULT_API_VERSION);
   }
 
   private async getToken(): Promise<{ accessToken: string; instanceUrl: string }> {
@@ -69,7 +82,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const encodedQuery = encodeURIComponent(soql);
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/query/?q=${encodedQuery}`;
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
@@ -101,7 +114,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     let nextUrl = rows.nextRecordsUrl;
     while (nextUrl) {
       const token = await this.getToken();
-      const response = await fetch(
+      const response = await sfFetch(
         `${token.instanceUrl}${nextUrl}`,
         {
           headers: {
@@ -137,7 +150,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}`;
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
@@ -185,7 +198,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/${id}`;
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
@@ -216,7 +229,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/${id}`;
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
@@ -244,7 +257,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/describe`;
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
@@ -275,7 +288,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       url += `?fields=${fields.join(',')}`;
     }
 
-    const response = await fetch(url, {
+    const response = await sfFetch(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
@@ -647,8 +660,8 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getPrimaryOrderDetails(context: ResolvedDistributorContext, orderId: string, correlationId?: string): Promise<PrimaryOrderDetail> {
     try {
-      const escapedsfAccountId = context.salesforceAccountId.replace(/'/g, "\\'");
-      const escapedOrderId = orderId.replace(/'/g, "\\'");
+      const escapedsfAccountId = escapeSoql(context.salesforceAccountId);
+      const escapedOrderId = escapeSoql(orderId);
       const soql = `SELECT Id, OrderNumber, AccountId, Status, Type, EffectiveDate, TotalAmount, Grand_Total__c, Discount_Amount__c, Credit_Applied__c, Tax_Amount__c, Approval_Status__c, Order_Products__c, Description FROM Order WHERE Id = '${escapedOrderId}' AND AccountId = '${escapedsfAccountId}' AND Type = 'Primary' LIMIT 1`;
       const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Status: string; EffectiveDate: string; TotalAmount: number; Grand_Total__c: number; Discount_Amount__c: number; Credit_Applied__c: number; Tax_Amount__c: number; Approval_Status__c: string; Order_Products__c?: string }>(soql, correlationId);
       if (result.records.length === 0) throw new SalesforceError('Order not found or access denied');
@@ -749,8 +762,8 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getReturnOrderDetails(context: ResolvedDistributorContext, returnOrderId: string, correlationId?: string): Promise<ReturnOrderDetail> {
     try {
-      const escapedsfAccountId = context.salesforceAccountId.replace(/'/g, "\\'");
-      const escapedId = returnOrderId.replace(/'/g, "\\'");
+      const escapedsfAccountId = escapeSoql(context.salesforceAccountId);
+      const escapedId = escapeSoql(returnOrderId);
       const soql = `SELECT Id, Name, Account__c, Order__c, Status__c, Grand_Total__c, Description__c, Type__c FROM Return_Order__c WHERE Id = '${escapedId}' AND Account__c = '${escapedsfAccountId}' LIMIT 1`;
       const result = await this.query<{ Id: string; Name: string; Account__c: string; Order__c?: string; Status__c: string; Grand_Total__c: number; Description__c: string; Type__c: string }>(soql, correlationId);
       if (result.records.length === 0) throw new SalesforceError('Return order not found');
@@ -847,7 +860,7 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getApprovalStatus(_context: ResolvedDistributorContext, recordId: string, objectName: string, correlationId?: string): Promise<ApprovalStatus> {
     try {
-      const soql = `SELECT Id, Approval_Status__c FROM ${objectName} WHERE Id = '${recordId.replace(/'/g, "\\'")}' LIMIT 1`;
+      const soql = `SELECT Id, Approval_Status__c FROM ${objectName} WHERE Id = '${escapeSoql(recordId)}' LIMIT 1`;
       const result = await this.query<{ Id: string; Approval_Status__c: string }>(soql, correlationId);
       const status = result.records[0]?.Approval_Status__c || 'Unknown';
       return { recordId, status, isPending: status === 'Pending', isApproved: status === 'Approved', isRejected: status === 'Rejected' };
@@ -1012,12 +1025,43 @@ export class SalesforceRestClient implements ISalesforceClient {
   }
   async getBatchWiseStockPolicies(context: ResolvedDistributorContext): Promise<BatchStockPolicy[]> {
     try {
-      const escapedId = context.salesforceAccountId.replace(/'/g, "\\'");
+      const escapedId = escapeSoql(context.salesforceAccountId);
       const result = await this.query<{ Id: string; Name: string; Product__c: string; Product__r?: { Name?: string }; Expiry_Date__c: string; Status__c: string }>(`SELECT Id, Name, Product__c, Product__r.Name, Expiry_Date__c, Status__c FROM Inventory_Batch__c WHERE Distributor__c = '${escapedId}' LIMIT 50`);
       return result.records.map((r) => ({ batchId: r.Id, batchNumber: r.Name, productId: r.Product__c, productName: r.Product__r?.Name || r.Product__c, availableStock: 0, minStock: 0, maxStock: 0, expiryDate: r.Expiry_Date__c, replenishmentStatus: r.Status__c || 'Read-only', lastUpdated: '' }));
     } catch { throw new SalesforceError('Failed to fetch batch stock policies.'); }
   }
   async getARSTriggeredOrders(): Promise<ArsTriggeredOrder[]> { return []; }
+
+  async applyARSPolicyChanges(
+    accountId: string,
+    changes: Array<{ productId: string; newMin: number; newMax: number }>,
+    correlationId?: string,
+  ): Promise<void> {
+    const escapedAccountId = escapeSoql(accountId);
+    for (const change of changes) {
+      const escapedProductId = escapeSoql(change.productId || '');
+      try {
+        const batches = await this.query<{ Id: string }>(
+          `SELECT Id FROM Inventory_Batch__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 5`,
+          correlationId,
+        );
+        for (const batch of batches.records) {
+          await this.update('Inventory_Batch__c', batch.Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax }, correlationId);
+        }
+      } catch (batchErr) {
+        logger.warn({ err: batchErr, productId: change.productId }, 'Could not update Inventory_Batch__c, trying Inventory_Policy__c');
+        try {
+          const policyQuery = await this.query<{ Id: string }>(
+            `SELECT Id FROM Inventory_Policy__c WHERE Distributor__c = '${escapedAccountId}' AND Product__c = '${escapedProductId}' LIMIT 1`,
+            correlationId,
+          );
+          if (policyQuery.records.length > 0) {
+            await this.update('Inventory_Policy__c', policyQuery.records[0].Id, { Minimum_Quantity__c: change.newMin, Maximum_Quantity__c: change.newMax }, correlationId);
+          }
+        } catch { /* Inventory_Policy__c may not exist */ }
+      }
+    }
+  }
 
   async getBusinessInsightsEnhanced(): Promise<AIBusinessInsight[]> { throw new SalesforceError('AI insights not available via REST API (BLK-009).'); }
   async getStockThresholdRecommendations(): Promise<AIStockRecommendation[]> { throw new SalesforceError('Stock threshold AI not available via REST API (BLK-009).'); }
