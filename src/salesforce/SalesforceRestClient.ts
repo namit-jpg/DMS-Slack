@@ -1361,7 +1361,7 @@ export class SalesforceRestClient implements ISalesforceClient {
 
     try {
       const r = await this.query<BatchRec>(
-        `SELECT Id, Product__c, Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) AND Status__c = 'Active' ORDER BY Expiry_Date__c ASC NULLS LAST`,
+        `SELECT Id, Product__c, Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) ORDER BY Expiry_Date__c ASC NULLS LAST`,
         correlationId,
       );
       batchRecords = r.records;
