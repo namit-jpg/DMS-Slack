@@ -687,10 +687,10 @@ export class SalesforceRestClient implements ISalesforceClient {
     }
   }
 
-  async createOrUpdateGRN(context: ResolvedDistributorContext, _orderId: string, grnData: GRNPayload, correlationId?: string): Promise<GRNResult> {
+  async createOrUpdateGRN(context: ResolvedDistributorContext, orderId: string, grnData: GRNPayload, correlationId?: string): Promise<GRNResult> {
     try {
       const order = await this.query<{ Id: string; Type: string }>(
-        `SELECT Id, Type FROM Order WHERE Id = '${escapeSoql(_orderId)}' AND AccountId = '${escapeSoql(context.salesforceAccountId)}' LIMIT 1`,
+        `SELECT Id, Type FROM Order WHERE Id = '${escapeSoql(orderId)}' AND AccountId = '${escapeSoql(context.salesforceAccountId)}' LIMIT 1`,
         correlationId,
       );
       if (order.records.length === 0) {
@@ -698,38 +698,81 @@ export class SalesforceRestClient implements ISalesforceClient {
           userMessage: 'Unable to process GRN because the order was not found for your distributor account.',
         });
       }
-      const grnIds: string[] = [];
+      const orderType = order.records[0].Type || 'Primary';
+
+      // Overall header status: Fully Received only when every item is received in full with no issues
+      const hasIssues = grnData.items.some(
+        (item) => item.damagedQuantity > 0 || item.missingQuantity > 0,
+      );
+      const overallStatus = hasIssues ? 'Partially Received' : 'Fully Received';
+
+      // Create one GRN__c header record per order
+      const grnHeaderId = await this.create('GRN__c', {
+        Order__c: orderId,
+        Account__c: context.salesforceAccountId,
+        Status__c: overallStatus,
+        Notes__c: grnData.notes || '',
+      }, correlationId);
+
+      // Create GRN_Line__c child records — one per product
       for (const item of grnData.items) {
-        const status = item.receivedQuantity >= item.expectedQuantity && item.damagedQuantity === 0 && item.missingQuantity === 0
-          ? 'Full Order Received'
-          : 'Partial Order Received';
-        const condition = item.damagedQuantity > 0
-          ? 'Damaged'
-          : item.missingQuantity > 0
-            ? 'Short Supply'
-            : 'Other';
-        const grnId = await this.create('GRN__c', {
-          Order__c: _orderId,
+        const lineStatus = (item.damagedQuantity > 0 || item.missingQuantity > 0)
+          ? 'Partially Received'
+          : 'Fully Received';
+        const condition = item.damagedQuantity > 0 && item.missingQuantity > 0
+          ? 'Damaged & Short Supply'
+          : item.damagedQuantity > 0
+            ? 'Damaged'
+            : item.missingQuantity > 0
+              ? 'Short Supply'
+              : 'Good';
+        await this.createGRNLineWithFallback({
+          GRN__c: grnHeaderId,
           Product__c: item.productId,
-          Order_Type__c: order.records[0].Type || 'Primary',
+          Order_Type__c: orderType,
           Quantity__c: item.expectedQuantity,
           Good_Quantity__c: item.receivedQuantity,
-          Defective_product_Quantity__c: item.damagedQuantity + item.missingQuantity,
+          Defective_product_Quantity__c: item.damagedQuantity,
+          Short_Quantity__c: item.missingQuantity,
           Product_Condition__c: condition,
-          Status__c: status,
+          Status__c: lineStatus,
         }, correlationId);
-        grnIds.push(grnId);
       }
+
       return {
-        grnId: grnIds[0] || '', grnNumber: grnIds.length === 1 ? `GRN-${grnIds[0].slice(-4)}` : `${grnIds.length} GRN rows`, orderId: _orderId,
-        status: 'Processed', items: grnData.items.map((i) => ({
-          productId: i.productId, receivedQuantity: i.receivedQuantity,
-          damagedQuantity: i.damagedQuantity, missingQuantity: i.missingQuantity,
+        grnId: grnHeaderId,
+        grnNumber: `GRN-${grnHeaderId.slice(-4)}`,
+        orderId,
+        status: overallStatus,
+        items: grnData.items.map((i) => ({
+          productId: i.productId,
+          receivedQuantity: i.receivedQuantity,
+          damagedQuantity: i.damagedQuantity,
+          missingQuantity: i.missingQuantity,
         })),
         notes: grnData.notes,
       };
     } catch (err) {
+      if (err instanceof SalesforceError) throw err;
       throw new SalesforceError('GRN creation failed', { userMessage: 'Unable to process GRN.', cause: err instanceof Error ? err : undefined });
+    }
+  }
+
+  private async createGRNLineWithFallback(fields: Record<string, unknown>, correlationId?: string): Promise<string> {
+    try {
+      return await this.create('GRN_Line__c', fields, correlationId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isFieldError = msg.includes('INVALID_FIELD') || msg.includes('No such column') || msg.includes('INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST');
+      if (!isFieldError) throw err;
+      // Short_Quantity__c may not exist in this org — merge it into Defective_product_Quantity__c
+      logger.warn({ err }, 'GRN_Line__c create rejected a field — retrying with Short_Quantity__c merged into Defective_product_Quantity__c');
+      const fallback = { ...fields };
+      if (typeof fallback.Short_Quantity__c === 'number' && typeof fallback.Defective_product_Quantity__c === 'number') {
+        fallback.Defective_product_Quantity__c = (fallback.Defective_product_Quantity__c as number) + (fallback.Short_Quantity__c as number);
+      }
+      delete fallback.Short_Quantity__c;
+      return await this.create('GRN_Line__c', fallback, correlationId);
     }
   }
 

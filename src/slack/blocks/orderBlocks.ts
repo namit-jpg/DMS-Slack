@@ -228,17 +228,23 @@ export function buildGRNModal(orderDetail: PrimaryOrderDetail, validationErrors?
 }
 
 export function buildGRNConfirmation(grn: GRNResult): Block[] {
+  const statusEmoji = grn.status === 'Fully Received' ? ':white_check_mark:' : ':warning:';
   const blocks: Block[] = [
-    buildHeader(':white_check_mark: GRN Processed'),
-    buildSection(`*GRN Number:* ${grn.grnNumber}\n*Status:* ${grn.status}\n*Order:* ${grn.orderId}`),
+    buildHeader(`${statusEmoji} GRN ${grn.status}`),
+    buildSection(`*GRN:* ${grn.grnNumber}\n*Status:* ${grn.status}\n*Order:* ${grn.orderId}`),
     buildDivider(),
-    buildSection('*Received Quantities:*'),
-    ...grn.items.map((i) => buildSection(`Product ${i.productId.slice(-4)}: Received ${i.receivedQuantity} | Damaged ${i.damagedQuantity} | Short ${i.missingQuantity}`)),
+    buildSection('*Line Item Summary:*'),
+    ...grn.items.map((i) => {
+      const lineStatus = (i.damagedQuantity > 0 || i.missingQuantity > 0) ? ':warning: Partially Received' : ':white_check_mark: Fully Received';
+      return buildSection(`${lineStatus}\nReceived: ${i.receivedQuantity} | Damaged: ${i.damagedQuantity} | Short: ${i.missingQuantity}`);
+    }),
   ];
   if (grn.createdReturnOrderId) {
     blocks.push(buildDivider());
-    blocks.push(buildSection(`:warning: *Return Order Created:* ${grn.createdReturnOrderId}\nDamaged/missing quantities have generated a return order.`));
+    blocks.push(buildSection(`:leftwards_arrow_with_hook: *Return Order Created:* ${grn.createdReturnOrderId}\nDamaged/short quantities have generated a return order.`));
   }
+  blocks.push(buildDivider());
+  blocks.push(buildContext(['GRN recorded in Salesforce. Line items have been created for each product.']));
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }
