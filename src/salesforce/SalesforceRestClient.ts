@@ -1355,36 +1355,37 @@ export class SalesforceRestClient implements ISalesforceClient {
     const idList = productIds.map((id) => `'${escapeSoql(id)}'`).join(',');
     const dEsc = escapeSoql(distributorId);
 
-    interface BatchRec { Id: string; Product__c: string; Quantity__c?: number; Available_Quantity__c?: number; Expiry_Date__c?: string }
-    let batchRecords: BatchRec[] = [];
-    let qtyKey: 'Quantity__c' | 'Available_Quantity__c' = 'Quantity__c';
+    interface InvRec { Id: string; Product__c: string; Quantity_Available__c?: number; Total_Quantity__c?: number; Expiry_Date__c?: string }
+    let records: InvRec[] = [];
+    let qtyField: 'Quantity_Available__c' | 'Total_Quantity__c' = 'Quantity_Available__c';
 
     try {
-      const r = await this.query<BatchRec>(
-        `SELECT Id, Product__c, Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) ORDER BY Expiry_Date__c ASC NULLS LAST`,
+      const r = await this.query<InvRec>(
+        `SELECT Id, Product__c, Quantity_Available__c, Expiry_Date__c FROM Inventory__c WHERE Account__c = '${dEsc}' AND Product__c IN (${idList})`,
         correlationId,
       );
-      batchRecords = r.records;
+      records = r.records;
     } catch (firstErr) {
       const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      logger.warn({ err: firstErr }, 'Could not query Inventory__c with Quantity_Available__c');
       if (msg.includes('INVALID_FIELD') || msg.includes('No such column')) {
         try {
-          const r2 = await this.query<BatchRec>(
-            `SELECT Id, Product__c, Available_Quantity__c, Expiry_Date__c FROM Inventory_Batch__c WHERE Distributor__c = '${dEsc}' AND Product__c IN (${idList}) ORDER BY Expiry_Date__c ASC NULLS LAST`,
+          const r2 = await this.query<InvRec>(
+            `SELECT Id, Product__c, Total_Quantity__c, Expiry_Date__c FROM Inventory__c WHERE Account__c = '${dEsc}' AND Product__c IN (${idList})`,
             correlationId,
           );
-          batchRecords = r2.records;
-          qtyKey = 'Available_Quantity__c';
-        } catch { logger.warn('Could not query Inventory_Batch__c — availability will show as zero'); }
+          records = r2.records;
+          qtyField = 'Total_Quantity__c';
+        } catch { logger.warn('Could not query Inventory__c — availability will show as zero'); }
       }
     }
 
-    for (const b of batchRecords) {
-      const qty = ((b[qtyKey]) as number | undefined) || 0;
-      const existing = resultMap.get(b.Product__c) ?? { qty: 0, batches: [] };
+    for (const inv of records) {
+      const qty = (inv[qtyField] as number | undefined) || 0;
+      const existing = resultMap.get(inv.Product__c) ?? { qty: 0, batches: [] };
       existing.qty += qty;
-      existing.batches.push({ batchId: b.Id, quantity: qty, expiryDate: b.Expiry_Date__c });
-      resultMap.set(b.Product__c, existing);
+      existing.batches.push({ batchId: inv.Id, quantity: qty, expiryDate: inv.Expiry_Date__c });
+      resultMap.set(inv.Product__c, existing);
     }
     return resultMap;
   }
