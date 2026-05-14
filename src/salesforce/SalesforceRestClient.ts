@@ -667,7 +667,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       if (result.records.length === 0) throw new SalesforceError('Order not found or access denied');
       const r = result.records[0];
       const items = await this.getOrderItems(r.Id, correlationId);
-      const grnIds = await this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId);
+      const grnIds = await this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId);
       const returnOrderIds = await this.getRelatedIds('Return_Order__c', 'Order__c', r.Id, correlationId);
       const invoiceIds = await this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId);
       const dispatchIds = await this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId);
@@ -706,8 +706,8 @@ export class SalesforceRestClient implements ISalesforceClient {
       );
       const overallStatus = hasIssues ? 'Partially Received' : 'Fully Received';
 
-      // Create one Goods_Receipt__c header record per order
-      const grnHeaderId = await this.create('Goods_Receipt__c', {
+      // Create one GRN__c header record per order
+      const grnHeaderId = await this.create('GRN__c', {
         Order__c: orderId,
         Status__c: overallStatus,
         Notes__c: grnData.notes || '',
@@ -726,7 +726,7 @@ export class SalesforceRestClient implements ISalesforceClient {
               ? 'Short Supply'
               : 'Good';
         await this.createGRNLineWithFallback({
-          Goods_Receipt__c: grnHeaderId,
+          GRN__c: grnHeaderId,
           Product__c: item.productId,
           Order_Type__c: orderType,
           Quantity__c: item.expectedQuantity,
@@ -777,7 +777,7 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getGRNDetails(_context: ResolvedDistributorContext, grnId: string, correlationId?: string): Promise<GRNResult> {
     try {
-      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number; Notes__c: string }>('Goods_Receipt__c', grnId, undefined, correlationId);
+      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number; Notes__c: string }>('GRN__c', grnId, undefined, correlationId);
       return {
         grnId: r.Id, grnNumber: r.Name, orderId: r.Order__c || '',
         status: r.Status__c, items: [], notes: r.Notes__c || '',
@@ -973,7 +973,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         this.getOrderItems(r.Id, correlationId),
         this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId),
         this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId),
-        this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId),
+        this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId),
         this.getFulfilledQtyByProduct(r.Id, correlationId),
         this.getShippingAddress(r.AccountId, correlationId),
       ]);
@@ -1230,7 +1230,7 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN> {
     try {
       const result = await this.query<{ Id: string; Name: string; Status__c: string }>(
-        `SELECT Id, Name, Status__c FROM Goods_Receipt__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 1`,
+        `SELECT Id, Name, Status__c FROM GRN__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 1`,
         correlationId,
       );
       if (result.records.length === 0) {

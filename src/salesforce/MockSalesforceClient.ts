@@ -508,7 +508,7 @@ export class MockSalesforceClient implements ISalesforceClient {
     this.objectFields.set('Return_Order__c', ['Id', 'Name', 'Account__c', 'Status__c', 'Grand_Total__c', 'Order__c', 'Type__c', 'Description__c', 'Approval_Status__c', 'Goods_Receipt_Note__c']);
     this.objectFields.set('Invoice__c', ['Id', 'Name', 'Billing_Account__c', 'Status__c', 'Total_Amount__c', 'Invoice_Date__c', 'Payment_Status__c', 'Type__c']);
     this.objectFields.set('Claim__c', ['Id', 'Name', 'Account__c', 'Claim_Type__c', 'Status__c', 'Amount__c', 'Total_Amount__c', 'Notes__c', 'Claim_Number__c', 'Distributor__c']);
-    this.objectFields.set('Goods_Receipt__c', ['Id', 'Name', 'Status__c', 'Order__c']);
+    this.objectFields.set('GRN__c', ['Id', 'Name', 'Status__c', 'Order__c']);
     this.objectFields.set('Dispatch_Request__c', ['Id', 'Name', 'Order__c', 'Status__c', 'Dispatch_Request_Name__c']);
     this.objectFields.set('Inventory_Batch__c', ['Id', 'Product__c', 'Distributor__c', 'Expiry_Date__c', 'Status__c']);
     this.objectFields.set('StoreScheme__c', ['Id', 'Retail_Store__c', 'Status__c', 'Start_Date__c', 'End_Date__c']);
