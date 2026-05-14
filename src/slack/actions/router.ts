@@ -291,6 +291,26 @@ export function registerAllActions(
     }
   });
 
+  app.action(/^mark_as_delivered_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const orderId = (action as any).action_id.replace('mark_as_delivered_', '');
+      await sfClient.update('Order', orderId, { Status: 'Delivered' });
+      const detail = await sfClient.getPrimaryOrderDetails(ctx, orderId);
+      const blocks = buildGRNModal(detail);
+      await safeRespond(body, respond, {
+        text: `:white_check_mark: Order ${detail.orderNumber} marked as Delivered. Please process GRN below.`,
+        blocks,
+        replace_original: false,
+      });
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
+  });
+
   app.action(/^process_grn_/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
@@ -313,8 +333,10 @@ export function registerAllActions(
       const { context: ctx } = await pipeline.resolve(userId);
       const orderId = (action as any).value;
       const detail = await sfClient.getPrimaryOrderDetails(ctx, orderId);
-      const payload: GRNPayload = { items: [], notes: '' };
       const grnState = (body as any).view?.state?.values || (body as any).state?.values || {};
+
+      // Parse quantities first so we can validate before touching Salesforce
+      const payload: GRNPayload = { items: [], notes: '' };
       for (const li of detail.items) {
         const recv = parseInt(grnState[`grn_recv_${li.productId}`]?.[`grn_input_recv_${li.productId}`]?.value || '0') || 0;
         const dmg = parseInt(grnState[`grn_dmg_${li.productId}`]?.[`grn_input_dmg_${li.productId}`]?.value || '0') || 0;
@@ -322,6 +344,24 @@ export function registerAllActions(
         payload.items.push({ productId: li.productId, expectedQuantity: li.expectedQuantity, receivedQuantity: recv, damagedQuantity: dmg, missingQuantity: miss });
       }
       payload.notes = grnState.grn_notes?.grn_input_notes?.value || '';
+
+      // Validate: Received + Short + Damaged must equal Ordered for every line
+      const validationErrors: string[] = [];
+      for (const item of payload.items) {
+        const li = detail.items.find((l) => l.productId === item.productId);
+        const ordered = item.expectedQuantity;
+        const total = item.receivedQuantity + item.missingQuantity + item.damagedQuantity;
+        if (total !== ordered) {
+          validationErrors.push(
+            `*${li?.productName || item.productId}*: Received (${item.receivedQuantity}) + Short (${item.missingQuantity}) + Damaged (${item.damagedQuantity}) = ${total}, but Ordered = ${ordered}`,
+          );
+        }
+      }
+      if (validationErrors.length > 0) {
+        const blocks = buildGRNModal(detail, validationErrors);
+        await safeRespond(body, respond, { text: 'GRN validation failed — quantities must add up to ordered amount.', blocks, replace_original: true });
+        return;
+      }
 
       const idempotencyKey = `grn-create-${userId}-${orderId}`;
       const grnExisting = checkIdempotency(idempotencyKey);

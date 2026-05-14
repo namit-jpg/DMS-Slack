@@ -169,7 +169,13 @@ export function buildOrderDetailBlocks(detail: PrimaryOrderDetail): Block[] {
   if (detail.invoiceIds.length > 0) blocks.push(buildSection(`:receipt: *Invoices:* ${detail.invoiceIds.join(', ')}`));
   if ((detail.creditNoteUsageIds || []).length > 0) blocks.push(buildSection(`:money_with_wings: *Credit Note Usages:* ${(detail.creditNoteUsageIds || []).join(', ')}`));
   const actions: any[] = [];
-  if (!detail.grnIds.length) actions.push(buildButton(':package: Process GRN', 'process_grn_' + detail.orderId, detail.orderId, 'primary'));
+  if (!detail.grnIds.length) {
+    if (detail.status === 'Delivered') {
+      actions.push(buildButton(':package: Process GRN', 'process_grn_' + detail.orderId, detail.orderId, 'primary'));
+    } else {
+      actions.push(buildButton(':truck: Mark as Delivered', 'mark_as_delivered_' + detail.orderId, detail.orderId, 'primary'));
+    }
+  }
   if (detail.returnOrderIds.length) actions.push(buildButton(':leftwards_arrow_with_hook: View Returns', 'view_ro_from_po_' + detail.orderId, detail.orderId));
   if (actions.length > 0) { blocks.push({ type: 'divider' }); blocks.push({ type: 'actions', elements: actions }); }
   blocks.push({ type: 'actions', elements: [
@@ -179,14 +185,21 @@ export function buildOrderDetailBlocks(detail: PrimaryOrderDetail): Block[] {
   return blocks;
 }
 
-export function buildGRNModal(orderDetail: PrimaryOrderDetail): Block[] {
-  const blocks: Block[] = [buildHeader(':package: Process GRN for ' + orderDetail.orderNumber)];
-  blocks.push(buildSection('Enter quantities received for each product:'));
+export function buildGRNModal(orderDetail: PrimaryOrderDetail, validationErrors?: string[]): Block[] {
+  const blocks: Block[] = [buildHeader(':package: Process GRN — ' + orderDetail.orderNumber)];
+  if (validationErrors && validationErrors.length > 0) {
+    blocks.push(buildSection(':x: *Validation Failed* — please correct the quantities below:'));
+    blocks.push(buildSection(validationErrors.map((e) => `• ${e}`).join('\n')));
+    blocks.push(buildContext(['Received + Short + Damaged must equal Ordered Quantity for every product.']));
+    blocks.push(buildDivider());
+  }
+  blocks.push(buildSection('For each product: *Received + Short + Damaged must equal Ordered Quantity.*'));
   orderDetail.items.forEach((li) => {
-    blocks.push(buildSection(`*${li.productName}* (Expected: ${li.expectedQuantity})`));
+    blocks.push(buildDivider());
+    blocks.push(buildSection(`*${li.productName}* — Ordered: *${li.expectedQuantity}*`));
     blocks.push({
       type: 'input', block_id: `grn_recv_${li.productId}`,
-      label: { type: 'plain_text', text: `Received Qty for ${li.productName}`, emoji: true },
+      label: { type: 'plain_text', text: 'Received Qty', emoji: true },
       element: { type: 'plain_text_input', action_id: `grn_input_recv_${li.productId}`, initial_value: String(li.expectedQuantity) },
     });
     blocks.push({
@@ -196,14 +209,15 @@ export function buildGRNModal(orderDetail: PrimaryOrderDetail): Block[] {
     });
     blocks.push({
       type: 'input', block_id: `grn_miss_${li.productId}`,
-      label: { type: 'plain_text', text: 'Missing Qty', emoji: true },
+      label: { type: 'plain_text', text: 'Short Qty', emoji: true },
       element: { type: 'plain_text_input', action_id: `grn_input_miss_${li.productId}`, initial_value: '0' }, optional: true,
     });
   });
+  blocks.push(buildDivider());
   blocks.push({
     type: 'input', block_id: 'grn_notes',
     label: { type: 'plain_text', text: 'Notes', emoji: true },
-      element: { type: 'plain_text_input', action_id: 'grn_input_notes', placeholder: { type: 'plain_text', text: 'Any additional notes...', emoji: true } }, optional: true,
+    element: { type: 'plain_text_input', action_id: 'grn_input_notes', placeholder: { type: 'plain_text', text: 'Any additional notes...', emoji: true } }, optional: true,
   });
   blocks.push({ type: 'actions', elements: [
     buildButton(':white_check_mark: Submit GRN', 'submit_grn_form', orderDetail.orderId, 'primary'),
@@ -219,7 +233,7 @@ export function buildGRNConfirmation(grn: GRNResult): Block[] {
     buildSection(`*GRN Number:* ${grn.grnNumber}\n*Status:* ${grn.status}\n*Order:* ${grn.orderId}`),
     buildDivider(),
     buildSection('*Received Quantities:*'),
-    ...grn.items.map((i) => buildSection(`Product ${i.productId.slice(-4)}: Received ${i.receivedQuantity} | Damaged ${i.damagedQuantity} | Missing ${i.missingQuantity}`)),
+    ...grn.items.map((i) => buildSection(`Product ${i.productId.slice(-4)}: Received ${i.receivedQuantity} | Damaged ${i.damagedQuantity} | Short ${i.missingQuantity}`)),
   ];
   if (grn.createdReturnOrderId) {
     blocks.push(buildDivider());
