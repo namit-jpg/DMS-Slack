@@ -677,16 +677,31 @@ export function registerAllActions(
       const userId = body.user.id; const { context: ctx } = await pipeline.resolve(userId);
       const orderId = (action as any).action_id.replace('process_so_invoice_', '');
       const availability = await sfClient.getInventoryAvailability(ctx, orderId);
-      const hasAnyStock = availability.some((a) => a.availableQuantity > 0);
+      const detail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
 
+      if (availability.length === 0) {
+        await safeRespond(body, respond, {
+          text: 'Already Invoiced',
+          blocks: [
+            buildHeader(':white_check_mark: Already Fully Invoiced'),
+            buildSection('All items in this order have already been invoiced. There are no pending quantities remaining.'),
+            buildDivider(),
+            ...buildSecondaryOrderDetail(detail),
+          ],
+          replace_original: false,
+        });
+        return;
+      }
+
+      const hasAnyStock = availability.some((a) => a.availableQuantity > 0);
       if (!hasAnyStock) {
         await safeRespond(body, respond, {
           text: 'No Stock Available',
           blocks: [
             buildHeader(':x: Cannot Process Invoice'),
-            buildSection('No stock is available for any product in this order. Invoice processing is blocked.'),
+            buildSection('No stock is available for any pending product in this order. Inventory records need to be updated with available quantities.'),
             buildDivider(),
-            ...buildSecondaryOrderDetail(await sfClient.getSecondaryOrderDetails(ctx, orderId)),
+            ...buildSecondaryOrderDetail(detail),
           ],
           replace_original: false,
         });
