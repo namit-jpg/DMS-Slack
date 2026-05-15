@@ -986,7 +986,7 @@ export class SalesforceRestClient implements ISalesforceClient {
 
       const items = orderItems.map((i) => {
         const fulfilledQty = i.fulfilledQuantity;
-        const pendingQty = i.remainingQty !== undefined ? i.remainingQty : Math.max(0, i.quantity - fulfilledQty);
+        const pendingQty = i.remainingQty != null ? i.remainingQty : Math.max(0, i.quantity - fulfilledQty);
         return {
           itemId: i.itemId, productId: i.productId, productName: i.productName,
           orderedQuantity: i.quantity, availableQuantity: 0,
