@@ -566,6 +566,7 @@ export interface SecondaryOrderDetail extends SecondaryOrder {
   grnIds: string[];
   canCreateInvoice: boolean;
   canUpdateDispatch: boolean;
+  hasPendingDispatch: boolean;
   sourceAddress: string;
   destinationAddress: string;
   remainingQtys: Array<{ productId: string; productName: string; orderedQty: number; remainingQty: number }>;

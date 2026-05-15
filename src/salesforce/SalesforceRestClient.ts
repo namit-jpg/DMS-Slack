@@ -776,6 +776,45 @@ export class SalesforceRestClient implements ISalesforceClient {
     }
   }
 
+  private async createGRNFromInvoice(orderId: string, invoiceId: string, correlationId?: string): Promise<string> {
+    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
+    const linesResult = await this.query<{ Id: string; Product__c?: string; Quantity__c?: number }>(
+      `SELECT Id, Product__c, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice__c = '${escapeSoql(invoiceId)}' AND Product__c != null`,
+      correlationId,
+    );
+    if (linesResult.records.length === 0) {
+      log.warn({ invoiceId }, 'No invoice line items with Product__c — skipping GRN creation');
+      return '';
+    }
+    const orderTypeResult = await this.query<{ Type?: string }>(
+      `SELECT Type FROM Order WHERE Id = '${escapeSoql(orderId)}' LIMIT 1`, correlationId,
+    ).catch(() => ({ records: [{ Type: 'Secondary' as string | undefined }] }));
+    const orderType = orderTypeResult.records[0]?.Type || 'Secondary';
+
+    const grnHeaderId = await this.create('GRN__c', {
+      Order__c: orderId,
+      Status__c: 'Full Order Received',
+    }, correlationId);
+
+    for (const line of linesResult.records) {
+      const qty = line.Quantity__c || 0;
+      if (qty <= 0 || !line.Product__c) continue;
+      await this.createGRNLineWithFallback({
+        GRN__c: grnHeaderId,
+        Product__c: line.Product__c,
+        Order_Type__c: orderType,
+        Quantity__c: qty,
+        Good_Quantity__c: qty,
+        Defective_product_Quantity__c: 0,
+        Short_Quantity__c: 0,
+        Product_Condition__c: 'Good',
+        Status__c: 'Fully Received',
+      }, correlationId);
+    }
+    log.info({ grnHeaderId, orderId, invoiceId, lineCount: linesResult.records.length }, 'GRN created from invoice line items');
+    return grnHeaderId;
+  }
+
   async getGRNDetails(_context: ResolvedDistributorContext, grnId: string, correlationId?: string): Promise<GRNResult> {
     try {
       const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number }>('GRN__c', grnId, undefined, correlationId);
@@ -970,14 +1009,19 @@ export class SalesforceRestClient implements ISalesforceClient {
       const fulfillmentStatus = r.Status || 'Unknown';
       const isFullyFulfilled = ['Fully Invoiced', 'Fully Fulfilled'].includes(fulfillmentStatus);
 
-      const [orderItems, invoiceIds, dispatchIds, grnIds, fulfilledMap, sourceAddress] = await Promise.all([
+      const [orderItems, invoiceIds, dispatchRecords, grnIds, fulfilledMap, sourceAddress] = await Promise.all([
         this.getOrderItems(r.Id, correlationId),
         this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId),
-        this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId),
+        this.query<{ Id: string; Status__c: string }>(
+          `SELECT Id, Status__c FROM Dispatch_Request__c WHERE Order__c = '${escapedId}' ORDER BY CreatedDate DESC LIMIT 20`,
+          correlationId,
+        ).then((res) => res.records),
         this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId),
         this.getFulfilledQtyByProduct(r.Id, correlationId),
         this.getShippingAddress(r.AccountId, correlationId),
       ]);
+      const dispatchIds = dispatchRecords.map((d) => d.Id);
+      const hasPendingDispatch = dispatchRecords.some((d) => d.Status__c !== 'Delivered');
 
       const retailerId = r.Retailer_Account__c;
       const retailerName = r.Retailer_Account__r?.Name
@@ -1000,7 +1044,10 @@ export class SalesforceRestClient implements ISalesforceClient {
         .map((i) => ({ productId: i.productId, productName: i.productName, orderedQty: i.orderedQuantity, remainingQty: i.pendingQuantity }));
 
       const invoiceStatusDisplay = invoiceIds.length === 0 ? 'Not Invoiced' : isFullyFulfilled ? 'Fully Invoiced' : 'Partially Invoiced';
-      const dispatchStatusDisplay = dispatchIds.length > 0 ? 'Dispatch Created' : 'No Dispatch';
+      const dispatchStatusDisplay = dispatchIds.length === 0
+        ? 'No Dispatch'
+        : hasPendingDispatch ? 'In Transit'
+        : 'All Delivered';
 
       return {
         orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.Distributor_Account__c || r.AccountId,
@@ -1010,7 +1057,8 @@ export class SalesforceRestClient implements ISalesforceClient {
         dispatchStatus: dispatchStatusDisplay, orderDate: r.EffectiveDate,
         items, invoiceIds, dispatchIds, grnIds,
         canCreateInvoice: !isFullyFulfilled && items.some((i) => i.pendingQuantity > 0),
-        canUpdateDispatch: dispatchIds.length > 0,
+        canUpdateDispatch: hasPendingDispatch,
+        hasPendingDispatch,
         sourceAddress, destinationAddress: destinationAddress || retailerName,
         type: 'Secondary', remainingQtys,
       };
@@ -1140,7 +1188,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         const fulfilledMap = await this.getFulfilledQtyByProduct(orderId, correlationId);
         invoiceItems.forEach((i) => fulfilledMap.set(i.productId, (fulfilledMap.get(i.productId) || 0) + i.quantity));
         const allFulfilled = orderItems.every((oi) => (fulfilledMap.get(oi.productId) || 0) >= oi.quantity);
-        const newStatus = allFulfilled ? 'Fully Invoiced' : 'Partially Fulfilled';
+        const newStatus = allFulfilled ? 'Fully Invoiced' : 'Partially Invoiced';
         await this.update('Order', orderId, { Sub_Status__c: newStatus }, correlationId);
         log.info({ orderId, newStatus }, 'Order Sub_Status__c updated');
       } catch (statusErr) {
@@ -1200,19 +1248,25 @@ export class SalesforceRestClient implements ISalesforceClient {
       const r = await this.getRecord<{ Id: string; Dispatch_Request_Name__c?: string; Order__c?: string; Status__c: string; Invoice_Custom__c?: string; Start_Date__c?: string; End_Date__c?: string; Source_Address__c?: string; Destination_Address__c?: string }>('Dispatch_Request__c', dispatchRequestId, undefined, correlationId);
 
       if (newStatus === 'Delivered') {
+        // Mark invoice as Approved on delivery
         if (r.Invoice_Custom__c) {
           try {
-            await this.update('Invoice__c', r.Invoice_Custom__c, { Status__c: 'Paid', Payment_Status__c: 'Paid' }, correlationId);
-          } catch (invErr) { log.warn({ err: invErr }, 'Could not update Invoice on delivery'); }
+            await this.update('Invoice__c', r.Invoice_Custom__c, { Status__c: 'Approved' }, correlationId);
+          } catch (invErr) { log.warn({ err: invErr }, 'Could not update Invoice status to Approved on delivery'); }
         }
+        // Update Order Status → Delivered
         if (r.Order__c) {
           try {
-            const allDispatches = await this.getDispatchRequests(context, r.Order__c, correlationId);
-            if (allDispatches.length > 0 && allDispatches.every((d) => d.status === 'Delivered')) {
-              await this.update('Order', r.Order__c, { Sub_Status__c: 'Fully Fulfilled' }, correlationId);
-              log.info({ orderId: r.Order__c }, 'Order marked Fully Fulfilled');
-            }
-          } catch (orderErr) { log.warn({ err: orderErr }, 'Could not update Order on dispatch delivery'); }
+            await this.update('Order', r.Order__c, { Status: 'Delivered' }, correlationId);
+            log.info({ orderId: r.Order__c }, 'Order Status updated to Delivered');
+          } catch (orderErr) { log.warn({ err: orderErr }, 'Could not update Order Status to Delivered'); }
+        }
+        // Auto-create GRN from invoice line items
+        if (r.Invoice_Custom__c && r.Order__c) {
+          try {
+            const grnId = await this.createGRNFromInvoice(r.Order__c, r.Invoice_Custom__c, correlationId);
+            if (grnId) log.info({ grnId, invoiceId: r.Invoice_Custom__c, orderId: r.Order__c }, 'GRN created from invoice on dispatch delivery');
+          } catch (grnErr) { log.warn({ err: grnErr }, 'GRN creation from invoice failed — dispatch still delivered'); }
         }
       }
 

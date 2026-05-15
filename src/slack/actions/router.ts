@@ -794,7 +794,10 @@ export function registerAllActions(
 
       await sfClient.updateDispatchStatus(ctx, pendingDispatch.dispatchId, 'Delivered');
 
-      const updatedDispatches = await sfClient.getDispatchRequests(ctx, orderId);
+      const [updatedDispatches, updatedDetail] = await Promise.all([
+        sfClient.getDispatchRequests(ctx, orderId),
+        sfClient.getSecondaryOrderDetails(ctx, orderId),
+      ]);
       const remainingPending = updatedDispatches.filter((d) => d.status !== 'Delivered').length;
 
       if (remainingPending === 0) {
@@ -802,15 +805,25 @@ export function registerAllActions(
       }
 
       const dispatchSummary = updatedDispatches.map((d) => `*${d.dispatchName}*: ${d.status}`).join('\n');
+      const grnNote = updatedDetail.grnIds.length > 0
+        ? `\n\n:package: *GRN Created* — ${updatedDetail.grnIds.length} GRN(s) recorded for received goods`
+        : '';
+
       const blocks: any[] = [
         buildHeader(':white_check_mark: Delivery Confirmed'),
-        buildSection(`Dispatch *${pendingDispatch.dispatchName}* marked as *Delivered*.\n\n*All dispatches:*\n${dispatchSummary}`),
+        buildSection(`Dispatch *${pendingDispatch.dispatchName}* marked as *Delivered*.\n\n*All dispatches:*\n${dispatchSummary}${grnNote}`),
       ];
       if (remainingPending > 0) {
         blocks.push(buildSection(`:hourglass: ${remainingPending} dispatch(es) still pending.`));
         blocks.push({ type: 'actions', elements: [buildButton(':package: Mark Next as Delivered', `so_dispatch_deliver_${orderId}`, orderId, 'primary')] });
       } else {
-        blocks.push(buildSection(':tada: All dispatches delivered. Order fully fulfilled!'));
+        blocks.push(buildSection(':tada: All dispatches delivered! Order Status updated to Delivered.'));
+      }
+      // If there are still uninvoiced items (partial invoice scenario), offer next invoice step
+      if (updatedDetail.canCreateInvoice) {
+        blocks.push(buildDivider());
+        blocks.push(buildSection(`:receipt: *${updatedDetail.remainingQtys.length} product(s) still pending invoice.* Process the next invoice for remaining quantities.`));
+        blocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice for Remaining', `process_so_invoice_${orderId}`, orderId, 'primary')] });
       }
 
       await safeRespond(body, respond, { text: 'Dispatch Updated', blocks, replace_original: false });

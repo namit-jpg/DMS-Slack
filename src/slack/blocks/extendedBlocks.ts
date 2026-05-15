@@ -61,9 +61,15 @@ export function buildSecondaryOrderDetail(detail: SecondaryOrderDetail): Block[]
   });
 
   blocks.push(buildDivider());
+
+  // Show GRN summary if any GRNs have been created
+  if (detail.grnIds.length > 0) {
+    blocks.push(buildSection(`:package: *GRN(s) Created:* ${detail.grnIds.length} — goods received and recorded`));
+  }
+
   const actions: any[] = [];
   if (detail.canCreateInvoice) actions.push(buildButton(':receipt: Process Invoice', `process_so_invoice_${detail.orderId}`, detail.orderId, 'primary'));
-  if (detail.canUpdateDispatch && !['Fully Fulfilled', 'Delivered'].includes(detail.dispatchStatus)) {
+  if (detail.canUpdateDispatch) {
     actions.push(buildButton(':truck: Mark Delivered', `so_dispatch_deliver_${detail.orderId}`, detail.orderId));
   }
   if (actions.length > 0) blocks.push({ type: 'actions', elements: actions });

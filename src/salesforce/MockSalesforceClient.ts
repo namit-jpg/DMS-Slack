@@ -404,7 +404,7 @@ export class MockSalesforceClient implements ISalesforceClient {
         unitPrice: (p.Unit_Price__c || 0) as number, unitOfMeasure: (p.Unit_Of_Measure__c || 'Each') as string,
       })),
       invoiceIds: ['a03MOCK000000001'], dispatchIds: ['d04MOCK000000001'], grnIds: [],
-      canCreateInvoice: true, canUpdateDispatch: true,
+      canCreateInvoice: true, canUpdateDispatch: true, hasPendingDispatch: true,
       sourceAddress: '123 Distributor Warehouse, Mumbai', destinationAddress: '456 Retail Store, Pune',
       remainingQtys: MOCK_PRODUCTS.slice(0, 2).map((p) => ({
         productId: p.Id as string, productName: p.Name as string, orderedQty: 30, remainingQty: 30,
