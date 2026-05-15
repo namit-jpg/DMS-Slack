@@ -1059,7 +1059,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       const invoiceId = await this.create('Invoice__c', {
         Billing_Account__c: context.salesforceAccountId,
         Order__c: orderId,
-        Status__c: 'Generated',
+        Status__c: 'New',
         Total_Amount__c: totalAmount,
         Invoice_Amount__c: totalAmount,
         Invoice_Date__c: today,
