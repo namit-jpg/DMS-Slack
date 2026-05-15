@@ -184,6 +184,8 @@ export interface ISalesforceClient {
   getDispatchRequests(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<DispatchRequest[]>;
   updateDispatchStatus(context: ResolvedDistributorContext, dispatchRequestId: string, newStatus: string, correlationId?: string): Promise<DispatchRequest>;
   getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN>;
+  getInvoiceLineItems(context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>>;
+  createGRNFromDelivery(context: ResolvedDistributorContext, orderId: string, invoiceId: string, items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
 
   // ARS
   getARSConfig(context: ResolvedDistributorContext, correlationId?: string): Promise<ArsConfig>;
@@ -700,6 +702,8 @@ export interface ISalesforceClientExtended {
   getDispatchRequests(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<DispatchRequest[]>;
   updateDispatchStatus(context: ResolvedDistributorContext, dispatchRequestId: string, newStatus: string, correlationId?: string): Promise<DispatchRequest>;
   getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN>;
+  getInvoiceLineItems(context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>>;
+  createGRNFromDelivery(context: ResolvedDistributorContext, orderId: string, invoiceId: string, items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
 
   // ARS
   getARSConfig(context: ResolvedDistributorContext, correlationId?: string): Promise<ArsConfig>;

@@ -21,6 +21,7 @@ import {
 } from '../blocks/orderBlocks';
 import {
   buildSecondaryOrderList, buildSecondaryOrderDetail, buildInvoiceProcessing, buildInvoiceConfirmation,
+  buildGRNEntryForm, buildGRNConfirmation as buildSOGRNConfirmation,
   buildARSDashboard, buildAIInsightsDashboard, buildAIRecommendationApplied, buildAIFallback,
   buildARSOrdersList, buildEnhancedInventoryView,
   buildARSApprovalMessage, buildARSApprovalAcknowledgement, buildARSEditProduct, buildARSChangeRequestForm,
@@ -792,41 +793,100 @@ export function registerAllActions(
         return;
       }
 
-      await sfClient.updateDispatchStatus(ctx, pendingDispatch.dispatchId, 'Delivered');
+      const updatedDispatch = await sfClient.updateDispatchStatus(ctx, pendingDispatch.dispatchId, 'Delivered');
 
-      const [updatedDispatches, updatedDetail] = await Promise.all([
-        sfClient.getDispatchRequests(ctx, orderId),
-        sfClient.getSecondaryOrderDetails(ctx, orderId),
-      ]);
+      // Fetch invoice line items to show in GRN entry form
+      const invoiceId = updatedDispatch.invoiceId || pendingDispatch.invoiceId;
+      if (invoiceId) {
+        try {
+          const lineItems = await sfClient.getInvoiceLineItems(ctx, invoiceId);
+          if (lineItems.length > 0) {
+            const grnForm = buildGRNEntryForm(orderId, invoiceId, pendingDispatch.dispatchName, lineItems);
+            await safeRespond(body, respond, {
+              text: ':package: Record GRN quantities',
+              blocks: grnForm,
+              replace_original: false,
+            });
+            return;
+          }
+        } catch (lineErr) {
+          logger.warn({ err: lineErr, invoiceId }, 'Could not fetch invoice line items for GRN form — showing delivery confirmation');
+        }
+      }
+
+      // Fallback: no invoice line items found
+      const updatedDispatches = await sfClient.getDispatchRequests(ctx, orderId);
       const remainingPending = updatedDispatches.filter((d) => d.status !== 'Delivered').length;
+      if (remainingPending === 0) reminderService.deregister(orderId);
 
-      if (remainingPending === 0) {
+      await safeRespond(body, respond, {
+        text: ':white_check_mark: Delivery Confirmed',
+        blocks: [
+          buildHeader(':white_check_mark: Delivery Confirmed'),
+          buildSection(`Dispatch *${pendingDispatch.dispatchName}* marked as *Delivered*. Order Status updated to Delivered.`),
+          { type: 'actions', elements: [buildButton(':twisted_rightwards_arrows: View Order', `view_so_detail_${orderId}`, orderId)] },
+        ],
+        replace_original: false,
+      });
+    } catch (err) {
+      const { userMessage } = pipeline.resolveUserFacingMessage(err);
+      await safeRespond(body, respond, { text: userMessage, replace_original: false });
+    }
+  });
+
+  app.action(/^submit_grn_/, async ({ ack, body, respond, action }) => {
+    await ack();
+    try {
+      const userId = body.user.id;
+      const { context: ctx } = await pipeline.resolve(userId);
+      const actionId = (action as any).action_id as string;
+      const payload = actionId.replace('submit_grn_', '');
+      const separatorIdx = payload.indexOf('__');
+      const orderId = separatorIdx >= 0 ? payload.slice(0, separatorIdx) : payload;
+      const invoiceId = separatorIdx >= 0 ? payload.slice(separatorIdx + 2) : '';
+
+      // Read state values — block_ids: grn_lost_{productId} and grn_dmg_{productId}
+      const stateValues = (body as any).state?.values || {};
+
+      // Fetch invoice line items to know all products + ordered quantities
+      const lineItems = await sfClient.getInvoiceLineItems(ctx, invoiceId);
+      if (lineItems.length === 0) {
+        await safeRespond(body, respond, { text: ':x: Could not find invoice items to create GRN.', replace_original: false });
+        return;
+      }
+
+      const grnItems = lineItems.map((item) => {
+        const lostRaw = stateValues[`grn_lost_${item.productId}`]?.grn_qty_input?.value;
+        const dmgRaw = stateValues[`grn_dmg_${item.productId}`]?.grn_qty_input?.value;
+        const lostQty = Math.max(0, parseInt(lostRaw || '0', 10) || 0);
+        const damagedQty = Math.max(0, parseInt(dmgRaw || '0', 10) || 0);
+        const receivedQty = Math.max(0, item.quantity - lostQty - damagedQty);
+        return { productId: item.productId, receivedQty, lostQty, damagedQty };
+      });
+
+      const grn = await sfClient.createGRNFromDelivery(ctx, orderId, invoiceId, grnItems);
+
+      // Check for remaining uninvoiced items
+      const updatedDetail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
+      if (updatedDetail.remainingQtys.length === 0) {
         reminderService.deregister(orderId);
       }
 
-      const dispatchSummary = updatedDispatches.map((d) => `*${d.dispatchName}*: ${d.status}`).join('\n');
-      const grnNote = updatedDetail.grnIds.length > 0
-        ? `\n\n:package: *GRN Created* — ${updatedDetail.grnIds.length} GRN(s) recorded for received goods`
-        : '';
+      const confirmItems = lineItems.map((item, idx) => ({
+        productName: item.productName,
+        received: grnItems[idx]?.receivedQty ?? item.quantity,
+        lost: grnItems[idx]?.lostQty ?? 0,
+        damaged: grnItems[idx]?.damagedQty ?? 0,
+      }));
+      const grnBlocks = buildSOGRNConfirmation(grn.grnNumber, orderId, confirmItems);
 
-      const blocks: any[] = [
-        buildHeader(':white_check_mark: Delivery Confirmed'),
-        buildSection(`Dispatch *${pendingDispatch.dispatchName}* marked as *Delivered*.\n\n*All dispatches:*\n${dispatchSummary}${grnNote}`),
-      ];
-      if (remainingPending > 0) {
-        blocks.push(buildSection(`:hourglass: ${remainingPending} dispatch(es) still pending.`));
-        blocks.push({ type: 'actions', elements: [buildButton(':package: Mark Next as Delivered', `so_dispatch_deliver_${orderId}`, orderId, 'primary')] });
-      } else {
-        blocks.push(buildSection(':tada: All dispatches delivered! Order Status updated to Delivered.'));
-      }
-      // If there are still uninvoiced items (partial invoice scenario), offer next invoice step
       if (updatedDetail.canCreateInvoice) {
-        blocks.push(buildDivider());
-        blocks.push(buildSection(`:receipt: *${updatedDetail.remainingQtys.length} product(s) still pending invoice.* Process the next invoice for remaining quantities.`));
-        blocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice for Remaining', `process_so_invoice_${orderId}`, orderId, 'primary')] });
+        grnBlocks.push(buildDivider());
+        grnBlocks.push(buildSection(`:receipt: *${updatedDetail.remainingQtys.length} product(s) still pending invoice.* You can process another invoice for the remaining quantities.`));
+        grnBlocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice for Remaining', `process_so_invoice_${orderId}`, orderId, 'primary')] });
       }
 
-      await safeRespond(body, respond, { text: 'Dispatch Updated', blocks, replace_original: false });
+      await safeRespond(body, respond, { text: `GRN ${grn.grnNumber} recorded`, blocks: grnBlocks, replace_original: false });
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });

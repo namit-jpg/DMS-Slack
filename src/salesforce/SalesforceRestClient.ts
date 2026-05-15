@@ -1261,13 +1261,7 @@ export class SalesforceRestClient implements ISalesforceClient {
             log.info({ orderId: r.Order__c }, 'Order Status updated to Delivered');
           } catch (orderErr) { log.warn({ err: orderErr }, 'Could not update Order Status to Delivered'); }
         }
-        // Auto-create GRN from invoice line items
-        if (r.Invoice_Custom__c && r.Order__c) {
-          try {
-            const grnId = await this.createGRNFromInvoice(r.Order__c, r.Invoice_Custom__c, correlationId);
-            if (grnId) log.info({ grnId, invoiceId: r.Invoice_Custom__c, orderId: r.Order__c }, 'GRN created from invoice on dispatch delivery');
-          } catch (grnErr) { log.warn({ err: grnErr }, 'GRN creation from invoice failed — dispatch still delivered'); }
-        }
+        // GRN is created by the user via the GRN entry form — no auto-creation here
       }
 
       return {
@@ -1296,6 +1290,68 @@ export class SalesforceRestClient implements ISalesforceClient {
     } catch (err) {
       if (err instanceof SalesforceError) throw err;
       throw new SalesforceError('Secondary order GRN fetch failed', { userMessage: 'Unable to load GRN details.' });
+    }
+  }
+
+  async getInvoiceLineItems(_context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>> {
+    try {
+      const result = await this.query<{ Id: string; Product__c?: string; Product__r?: { Name?: string }; Quantity__c?: number }>(
+        `SELECT Id, Product__c, Product__r.Name, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice__c = '${escapeSoql(invoiceId)}' AND Product__c != null ORDER BY CreatedDate ASC`,
+        correlationId,
+      );
+      return result.records
+        .filter((r) => r.Product__c && (r.Quantity__c || 0) > 0)
+        .map((r) => ({
+          productId: r.Product__c as string,
+          productName: r.Product__r?.Name || r.Product__c as string,
+          quantity: r.Quantity__c || 0,
+        }));
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Invoice line items fetch failed', { userMessage: 'Unable to load invoice details.' });
+    }
+  }
+
+  async createGRNFromDelivery(
+    _context: ResolvedDistributorContext,
+    orderId: string,
+    invoiceId: string,
+    items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>,
+    correlationId?: string,
+  ): Promise<{ grnId: string; grnNumber: string }> {
+    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
+    try {
+      const validItems = items.filter((i) => i.receivedQty >= 0 || i.lostQty > 0 || i.damagedQty > 0);
+      if (validItems.length === 0) {
+        throw new SalesforceError('No GRN items to record', { userMessage: 'No quantities provided for GRN.' });
+      }
+
+      // GRN header — Status__c is managed by SF flow/formula
+      const grnHeaderId = await this.create('GRN__c', {
+        Order__c: orderId,
+      }, correlationId);
+      log.info({ grnHeaderId, orderId, invoiceId, itemCount: validItems.length }, 'GRN__c header created for delivery');
+
+      // GRN line items with user-provided quantities
+      for (const item of validItems) {
+        const totalQty = item.receivedQty + item.lostQty + item.damagedQty;
+        await this.createGRNLineWithFallback({
+          GRN__c: grnHeaderId,
+          Product__c: item.productId,
+          Order_Type__c: 'Secondary',
+          Quantity__c: totalQty,
+          Good_Quantity__c: item.receivedQty,
+          Defective_product_Quantity__c: item.damagedQty,
+          Short_Quantity__c: item.lostQty,
+        }, correlationId);
+      }
+
+      const grnNumber = `GRN-${grnHeaderId.slice(-6).toUpperCase()}`;
+      log.info({ grnHeaderId, grnNumber }, 'GRN created from delivery user input');
+      return { grnId: grnHeaderId, grnNumber };
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('GRN creation failed', { userMessage: 'Unable to create GRN. Please try again.' });
     }
   }
 

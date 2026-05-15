@@ -441,6 +441,19 @@ export class MockSalesforceClient implements ISalesforceClient {
     return { grnId: 'grnSO001', grnNumber: 'GRN-SO-0001', secondaryOrderId: orderId, status: 'Completed', items: [{ productId: '01tMOCK000000001', receivedQuantity: 30 }] };
   }
 
+  async getInvoiceLineItems(_ctx: ResolvedDistributorContext, invoiceId: string): Promise<Array<{ productId: string; productName: string; quantity: number }>> {
+    return MOCK_PRODUCTS.slice(0, 2).map((p) => ({
+      productId: p.Id as string,
+      productName: p.Name as string,
+      quantity: 20,
+    }));
+  }
+
+  async createGRNFromDelivery(_ctx: ResolvedDistributorContext, _orderId: string, _invoiceId: string, items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>): Promise<{ grnId: string; grnNumber: string }> {
+    const grnId = `grnDEL_${Date.now().toString(36)}`;
+    return { grnId, grnNumber: `GRN-${grnId.slice(-6).toUpperCase()}` };
+  }
+
   async getARSConfig(_ctx: ResolvedDistributorContext): Promise<ArsConfig> {
     return {
       autoReplenishmentEnabled: true,

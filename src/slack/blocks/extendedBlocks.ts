@@ -150,6 +150,75 @@ export function buildInvoiceConfirmation(invoice: DMSInvoice, dispatches: Dispat
   return blocks;
 }
 
+export function buildGRNEntryForm(
+  orderId: string,
+  invoiceId: string,
+  dispatchName: string,
+  lineItems: Array<{ productId: string; productName: string; quantity: number }>,
+): Block[] {
+  const blocks: Block[] = [
+    buildHeader(':package: Record Goods Receipt (GRN)'),
+    buildSection(`Dispatch *${dispatchName}* delivered. Enter quantities received for each product.`),
+    buildContext([':information_source: *Received* = full quantity accepted | *Lost/Short* = not received | *Damaged* = received but damaged']),
+    buildDivider(),
+  ];
+
+  lineItems.forEach((item) => {
+    blocks.push(buildSection(`*${item.productName}*  —  Invoiced: *${item.quantity}*`));
+    blocks.push({
+      type: 'input',
+      block_id: `grn_lost_${item.productId}`,
+      label: { type: 'plain_text', text: `Lost / Short Supply`, emoji: false },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'grn_qty_input',
+        placeholder: { type: 'plain_text', text: '0', emoji: false },
+        initial_value: '0',
+      },
+      optional: true,
+    });
+    blocks.push({
+      type: 'input',
+      block_id: `grn_dmg_${item.productId}`,
+      label: { type: 'plain_text', text: `Damaged`, emoji: false },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'grn_qty_input',
+        placeholder: { type: 'plain_text', text: '0', emoji: false },
+        initial_value: '0',
+      },
+      optional: true,
+    });
+  });
+
+  blocks.push(buildDivider());
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':white_check_mark: Submit GRN', `submit_grn_${orderId}__${invoiceId}`, `${orderId}__${invoiceId}`, 'primary'),
+    buildButton(':x: Skip GRN', `view_so_detail_${orderId}`, orderId),
+  ]});
+  return blocks;
+}
+
+export function buildGRNConfirmation(grnNumber: string, orderId: string, items: Array<{ productName: string; received: number; lost: number; damaged: number }>): Block[] {
+  const blocks: Block[] = [
+    buildHeader(':white_check_mark: GRN Recorded'),
+    buildSection(`*GRN Number:* ${grnNumber}\n\nGoods receipt has been recorded in Salesforce. Status will be updated automatically.`),
+    buildDivider(),
+  ];
+  items.forEach((i) => {
+    const parts = [`Received: *${i.received}*`];
+    if (i.lost > 0) parts.push(`Lost/Short: *${i.lost}*`);
+    if (i.damaged > 0) parts.push(`Damaged: *${i.damaged}*`);
+    blocks.push(buildSection(`*${i.productName}*\n${parts.join(' | ')}`));
+  });
+  blocks.push(buildDivider());
+  blocks.push({ type: 'actions', elements: [
+    buildButton(':twisted_rightwards_arrows: View Order', `view_so_detail_${orderId}`, orderId),
+    buildButton(':arrow_left: Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary'),
+  ]});
+  return blocks;
+}
+
 export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[] {
   if (dispatches.length === 0) return [buildHeader(':truck: Dispatch Status'), buildSection('No dispatch requests found.'), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
   const blocks: Block[] = [buildHeader(':truck: Dispatch Status'), buildDivider()];
