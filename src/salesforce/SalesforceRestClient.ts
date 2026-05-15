@@ -353,11 +353,12 @@ export class SalesforceRestClient implements ISalesforceClient {
       Product2Id: string;
       Product2?: { Name?: string; ProductCode?: string };
       Quantity: number;
+      Remaining_Qty__c?: number;
       UnitPrice: number;
       TotalPrice: number;
       Unit_Of_Measure__c?: string;
     }>(
-      `SELECT Id, Product2Id, Product2.Name, Product2.ProductCode, Quantity, UnitPrice, TotalPrice, Unit_Of_Measure__c FROM OrderItem WHERE OrderId = '${escapedOrderId}' ORDER BY CreatedDate ASC`,
+      `SELECT Id, Product2Id, Product2.Name, Product2.ProductCode, Quantity, Remaining_Qty__c, UnitPrice, TotalPrice, Unit_Of_Measure__c FROM OrderItem WHERE OrderId = '${escapedOrderId}' ORDER BY CreatedDate ASC`,
       correlationId,
     );
 
@@ -370,9 +371,10 @@ export class SalesforceRestClient implements ISalesforceClient {
       unitPrice: r.UnitPrice || 0,
       totalPrice: r.TotalPrice || 0,
       unitOfMeasure: r.Unit_Of_Measure__c || 'Each',
-      fulfilledQuantity: 0,
+      fulfilledQuantity: Math.max(0, (r.Quantity || 0) - (r.Remaining_Qty__c || 0)),
       expectedQuantity: r.Quantity || 0,
       deliveryStatus: 'Pending',
+      remainingQty: r.Remaining_Qty__c,
     }));
   }
 
@@ -983,8 +985,8 @@ export class SalesforceRestClient implements ISalesforceClient {
       const destinationAddress = retailerId ? await this.getShippingAddress(retailerId, correlationId) : '';
 
       const items = orderItems.map((i) => {
-        const fulfilledQty = fulfilledMap.get(i.productId) || 0;
-        const pendingQty = Math.max(0, i.quantity - fulfilledQty);
+        const fulfilledQty = i.fulfilledQuantity;
+        const pendingQty = i.remainingQty !== undefined ? i.remainingQty : Math.max(0, i.quantity - fulfilledQty);
         return {
           itemId: i.itemId, productId: i.productId, productName: i.productName,
           orderedQuantity: i.quantity, availableQuantity: 0,

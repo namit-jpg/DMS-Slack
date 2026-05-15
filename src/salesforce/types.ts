@@ -294,6 +294,7 @@ export interface PrimaryOrderItemDetail extends PrimaryOrderItem {
   fulfilledQuantity: number;
   expectedQuantity: number;
   deliveryStatus: string;
+  remainingQty?: number;
 }
 
 export interface PrimaryOrderQuote {
