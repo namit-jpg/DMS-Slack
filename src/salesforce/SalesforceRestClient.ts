@@ -371,7 +371,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       unitPrice: r.UnitPrice || 0,
       totalPrice: r.TotalPrice || 0,
       unitOfMeasure: r.Unit_Of_Measure__c || 'Each',
-      fulfilledQuantity: Math.max(0, (r.Quantity || 0) - (r.Remaining_Qty__c || 0)),
+      fulfilledQuantity: r.Remaining_Qty__c != null ? Math.max(0, (r.Quantity || 0) - r.Remaining_Qty__c) : 0,
       expectedQuantity: r.Quantity || 0,
       deliveryStatus: 'Pending',
       remainingQty: r.Remaining_Qty__c,
