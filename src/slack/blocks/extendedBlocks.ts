@@ -28,7 +28,7 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
       const dispEmoji = o.dispatchStatus === 'Delivered' ? ':truck:' : o.dispatchStatus === 'Pending' ? ':package:' : ':hourglass:';
       blocks.push({
         type: 'section',
-        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'}` },
+        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'} | Date: ${o.orderDate || 'N/A'}` },
         accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());

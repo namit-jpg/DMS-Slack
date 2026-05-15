@@ -704,7 +704,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       const hasIssues = grnData.items.some(
         (item) => item.damagedQuantity > 0 || item.missingQuantity > 0,
       );
-      const overallStatus = hasIssues ? 'Partially Received' : 'Fully Received';
+      const overallStatus = hasIssues ? 'Partial Order Received' : 'Full Order Received';
 
       // Create one GRN__c header record per order
       const grnHeaderId = await this.create('GRN__c', {
@@ -715,7 +715,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       // Create GRN_Line__c child records — one per product
       for (const item of grnData.items) {
         const lineStatus = (item.damagedQuantity > 0 || item.missingQuantity > 0)
-          ? 'Partially Received'
+          ? 'Partial Order Received'
           : 'Fully Received';
         const condition = item.damagedQuantity > 0 && item.missingQuantity > 0
           ? 'Damaged & Short Supply'

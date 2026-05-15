@@ -166,7 +166,7 @@ export function buildOrderDetailBlocks(detail: PrimaryOrderDetail): Block[] {
   ];
   if (detail.grnIds.length > 0) blocks.push(buildSection(`:package: *GRNs:* ${detail.grnIds.join(', ')}`));
   if (detail.returnOrderIds.length > 0) blocks.push(buildSection(`:leftwards_arrow_with_hook: *Return Orders:* ${detail.returnOrderIds.join(', ')}`));
-  if (detail.invoiceIds.length > 0) blocks.push(buildSection(`:receipt: *Invoices:* ${detail.invoiceIds.join(', ')}`));
+  if (detail.invoiceIds.length > 0) blocks.push(buildSection(`:receipt: *Invoices:* ${detail.invoiceIds.length} invoice(s) — view in Secondary Orders for details`));
   if ((detail.creditNoteUsageIds || []).length > 0) blocks.push(buildSection(`:money_with_wings: *Credit Note Usages:* ${(detail.creditNoteUsageIds || []).join(', ')}`));
   const actions: any[] = [];
   if (!detail.grnIds.length) {
