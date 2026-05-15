@@ -930,8 +930,8 @@ export class SalesforceRestClient implements ISalesforceClient {
   async getSecondaryOrders(context: ResolvedDistributorContext, correlationId?: string): Promise<SecondaryOrder[]> {
     try {
       const escapedId = escapeSoql(context.salesforceAccountId);
-      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(
-        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE AccountId = '${escapedId}' AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`,
+      const records = (await this.query<{ Id: string; OrderNumber: string; AccountId: string; Distributor_Account__c?: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string; Type?: string }>(
+        `SELECT Id, OrderNumber, AccountId, Distributor_Account__c, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate, Type FROM Order WHERE (AccountId = '${escapedId}' OR Distributor_Account__c = '${escapedId}') AND Type = 'Secondary' ORDER BY CreatedDate DESC LIMIT 50`,
         correlationId,
       )).records;
       const missingIds = [...new Set(records.filter((r) => !r.Retailer_Account__r?.Name && r.Retailer_Account__c).map((r) => r.Retailer_Account__c as string))];
@@ -946,7 +946,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       return records.map((r) => {
         const fulfillmentStatus = r.Status;
         return {
-          orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
+          orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.Distributor_Account__c || r.AccountId,
           retailerCustomer: r.Retailer_Account__r?.Name || nameMap.get(r.Retailer_Account__c || '') || r.Retailer_Account__c || 'Unknown Retailer',
           status: r.Status, totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
           fulfillmentStatus, invoiceStatus: '', dispatchStatus: '', orderDate: r.EffectiveDate || '', items: [], type: r.Type,
@@ -959,8 +959,8 @@ export class SalesforceRestClient implements ISalesforceClient {
     try {
       const escapedId = escapeSoql(secondaryOrderId);
       const escapedAccountId = escapeSoql(context.salesforceAccountId);
-      const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
-        `SELECT Id, OrderNumber, AccountId, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND AccountId = '${escapedAccountId}' AND Type = 'Secondary' LIMIT 1`,
+      const result = await this.query<{ Id: string; OrderNumber: string; AccountId: string; Distributor_Account__c?: string; Retailer_Account__c?: string; Retailer_Account__r?: { Name?: string }; Status: string; TotalAmount: number; Grand_Total__c?: number; EffectiveDate: string }>(
+        `SELECT Id, OrderNumber, AccountId, Distributor_Account__c, Retailer_Account__c, Retailer_Account__r.Name, Status, TotalAmount, Grand_Total__c, EffectiveDate FROM Order WHERE Id = '${escapedId}' AND (AccountId = '${escapedAccountId}' OR Distributor_Account__c = '${escapedAccountId}') AND Type = 'Secondary' LIMIT 1`,
         correlationId,
       );
       if (result.records.length === 0) {
@@ -1003,7 +1003,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       const dispatchStatusDisplay = dispatchIds.length > 0 ? 'Dispatch Created' : 'No Dispatch';
 
       return {
-        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.AccountId,
+        orderId: r.Id, orderNumber: r.OrderNumber, distributorId: r.Distributor_Account__c || r.AccountId,
         retailerCustomer: retailerName, status: r.Status,
         totalAmount: r.TotalAmount || r.Grand_Total__c || 0,
         fulfillmentStatus, invoiceStatus: invoiceStatusDisplay,
