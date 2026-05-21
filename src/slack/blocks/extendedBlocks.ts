@@ -263,7 +263,7 @@ export function buildARSDashboard(
     blocks.push(buildSection(`*Policies (${display.length} shown)*`));
     display.forEach((p) => {
       const belowMin = p.availableStock < p.minStock;
-      const emoji = belowMin ? ':red_circle:' : ':green_circle:';
+      const emoji = belowMin ? ':red_circle:' : ':large_green_circle:';
       blocks.push(buildSection(
         `${emoji} *${p.productName}*\nStock: ${p.availableStock} | Min: ${p.minStock} | Max: ${p.maxStock}`,
       ));

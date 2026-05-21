@@ -85,8 +85,8 @@ export function buildDashboardChartSections(data: AllReportData): Block[] {
   blocks.push(chartImage(salesMixChartUrl(data.salesMix), 'Sales Mix'));
   blocks.push(buildSection(
     `:twisted_rightwards_arrows: *Primary vs Secondary Mix*\n` +
-    `:blue_circle: Primary: ${data.salesMix.primaryCount} orders | Rs ${fmt(data.salesMix.primaryValue)}\n` +
-    `:green_circle: Secondary: ${data.salesMix.secondaryCount} orders | Rs ${fmt(data.salesMix.secondaryValue)}`,
+    `:large_blue_circle: Primary: ${data.salesMix.primaryCount} orders | Rs ${fmt(data.salesMix.primaryValue)}\n` +
+    `:large_green_circle: Secondary: ${data.salesMix.secondaryCount} orders | Rs ${fmt(data.salesMix.secondaryValue)}`,
   ));
 
   blocks.push(buildDivider());
@@ -95,7 +95,7 @@ export function buildDashboardChartSections(data: AllReportData): Block[] {
   blocks.push(chartImage(agingChartUrl(data.aging), 'Pending Order Aging'));
   blocks.push(buildSection(
     `:hourglass_flowing_sand: *Pending Order Aging*\n` +
-    `:green_circle: 0-2d: ${data.aging.bucket02} | :yellow_circle: 3-5d: ${data.aging.bucket35} | :red_circle: 5+d: ${data.aging.bucket5plus}\n` +
+    `:large_green_circle: 0-2d: ${data.aging.bucket02} | :large_yellow_circle: 3-5d: ${data.aging.bucket35} | :red_circle: 5+d: ${data.aging.bucket5plus}\n` +
     `Total pending: ${data.aging.totalPending}`,
   ));
 
@@ -110,7 +110,7 @@ export function buildDashboardChartSections(data: AllReportData): Block[] {
   blocks.push(buildSection(
     `:memo: *Claims Dashboard*\n` +
     `:large_orange_circle: Open: Rs ${fmt(data.claims.openValue)} (${data.claims.openCount})\n` +
-    `:green_circle: Approved: Rs ${fmt(data.claims.approvedValue)} (${data.claims.approvedCount})\n` +
+    `:large_green_circle: Approved: Rs ${fmt(data.claims.approvedValue)} (${data.claims.approvedCount})\n` +
     `:red_circle: Rejected: Rs ${fmt(data.claims.rejectedValue)} (${data.claims.rejectedCount})`,
   ));
 
@@ -173,7 +173,7 @@ export function buildReportDashboardBlocks(data: AllReportData): Block[] {
     'Primary vs Secondary Sales Mix',
   ));
   blocks.push(buildContext([
-    `:blue_circle: Primary: Rs ${fmt(data.salesMix.primaryValue)} (${data.salesMix.primaryCount} orders)  |  :green_circle: Secondary: Rs ${fmt(data.salesMix.secondaryValue)} (${data.salesMix.secondaryCount} orders)`,
+    `:large_blue_circle: Primary: Rs ${fmt(data.salesMix.primaryValue)} (${data.salesMix.primaryCount} orders)  |  :large_green_circle: Secondary: Rs ${fmt(data.salesMix.secondaryValue)} (${data.salesMix.secondaryCount} orders)`,
   ]));
   blocks.push(buildDivider());
 
@@ -200,7 +200,7 @@ export function buildReportDashboardBlocks(data: AllReportData): Block[] {
     'Pending Order Aging Chart',
   ));
   blocks.push(buildContext([
-    `:green_circle: 0–2 days: ${data.aging.bucket02}  |  :yellow_circle: 3–5 days: ${data.aging.bucket35}  |  :red_circle: 5+ days: ${data.aging.bucket5plus}  |  Total pending: ${data.aging.totalPending}`,
+    `:large_green_circle: 0–2 days: ${data.aging.bucket02}  |  :large_yellow_circle: 3–5 days: ${data.aging.bucket35}  |  :red_circle: 5+ days: ${data.aging.bucket5plus}  |  Total pending: ${data.aging.totalPending}`,
   ]));
   blocks.push(buildDivider());
 
@@ -234,7 +234,7 @@ export function buildReportDashboardBlocks(data: AllReportData): Block[] {
     blocks.push(buildSection('_No claims data available._'));
   }
   blocks.push(buildContext([
-    `:large_orange_circle: Open: Rs ${fmt(data.claims.openValue)} (${data.claims.openCount})  |  :green_circle: Approved: Rs ${fmt(data.claims.approvedValue)} (${data.claims.approvedCount})  |  :red_circle: Rejected: Rs ${fmt(data.claims.rejectedValue)} (${data.claims.rejectedCount})`,
+    `:large_orange_circle: Open: Rs ${fmt(data.claims.openValue)} (${data.claims.openCount})  |  :large_green_circle: Approved: Rs ${fmt(data.claims.approvedValue)} (${data.claims.approvedCount})  |  :red_circle: Rejected: Rs ${fmt(data.claims.rejectedValue)} (${data.claims.rejectedCount})`,
   ]));
   blocks.push(buildDivider());
 
