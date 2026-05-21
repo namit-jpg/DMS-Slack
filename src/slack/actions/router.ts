@@ -566,13 +566,7 @@ export function registerAllActions(
   app.action(SLACK_ACTION_IDS.BACK_TO_MENU, async ({ ack, body, respond }) => {
     await ack();
     try {
-      const userId = body.user.id;
-      const { identity, context: ctx } = await pipeline.resolve(userId);
-      const metricsResult = await insightsService.getDashboardMetrics(ctx);
-      const insightsResult = await insightsService.getBusinessInsights(ctx);
-      const metrics = metricsResult.success ? metricsResult.data : buildEmptyDashboardMetrics();
-      const insights = insightsResult.success ? insightsResult.data : [];
-      const view = buildDashboardView(identity.displayName, metrics, insights);
+      const view = await buildDashboardWithCharts(insightsService, reportsService, pipeline, body.user.id);
       await safeRespond(body, respond, { text: 'DMS Dashboard', ...view, replace_original: true });
     } catch {
       const view = buildDashboardView('User', buildEmptyDashboardMetrics(), []);
@@ -585,12 +579,7 @@ export function registerAllActions(
     const userId = body.user.id;
     orderBuilders.delete(userId);
     try {
-      const { identity, context: ctx } = await pipeline.resolve(userId);
-      const metricsResult = await insightsService.getDashboardMetrics(ctx);
-      const insightsResult = await insightsService.getBusinessInsights(ctx);
-      const metrics = metricsResult.success ? metricsResult.data : buildEmptyDashboardMetrics();
-      const insights = insightsResult.success ? insightsResult.data : [];
-      const view = buildDashboardView(identity.displayName, metrics, insights);
+      const view = await buildDashboardWithCharts(insightsService, reportsService, pipeline, userId);
       await safeRespond(body, respond, { text: 'DMS Dashboard', ...view, replace_original: true });
     } catch {
       const view = buildDashboardView('User', buildEmptyDashboardMetrics(), []);
@@ -615,13 +604,7 @@ export function registerAllActions(
   app.action('refresh_insights', async ({ ack, body, respond }) => {
     await ack();
     try {
-      const userId = body.user.id;
-      const { identity, context: ctx } = await pipeline.resolve(userId);
-      const metricsResult = await insightsService.getDashboardMetrics(ctx);
-      const insightsResult = await insightsService.getBusinessInsights(ctx);
-      const metrics = metricsResult.success ? metricsResult.data : buildEmptyDashboardMetrics();
-      const insights = insightsResult.success ? insightsResult.data : [];
-      const view = buildDashboardView(identity.displayName, metrics, insights);
+      const view = await buildDashboardWithCharts(insightsService, reportsService, pipeline, body.user.id);
       await safeRespond(body, respond, { text: 'Dashboard', ...view, replace_original: true });
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
@@ -745,7 +728,7 @@ export function registerAllActions(
       markProcessing(idempotencyKey);
       const invoice = await sfClient.createInvoice(ctx, orderId, {
         items: invoiceItems,
-        fullOrPartial: isPartial ? 'partial' : 'full',
+        fullOrPartial: isPartial ? 'Partial' : 'Full',
         notes: '',
       });
       markCompleted(idempotencyKey, invoice);
@@ -795,6 +778,30 @@ export function registerAllActions(
 
       const updatedDispatch = await sfClient.updateDispatchStatus(ctx, pendingDispatch.dispatchId, 'Delivered');
 
+      let goodsReceiptLines = await sfClient.getGoodsReceiptLines(ctx, orderId);
+      for (let attempt = 0; goodsReceiptLines.length === 0 && attempt < 3; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        goodsReceiptLines = await sfClient.getGoodsReceiptLines(ctx, orderId);
+      }
+      if (goodsReceiptLines.length > 0) {
+        const grnForm = buildGRNEntryForm(
+          orderId,
+          '',
+          pendingDispatch.dispatchName,
+          goodsReceiptLines.map((line) => ({
+            productId: line.lineId,
+            productName: line.productName,
+            quantity: line.orderedQuantity,
+          })),
+        );
+        await safeRespond(body, respond, {
+          text: ':package: Record GRN quantities',
+          blocks: grnForm,
+          replace_original: false,
+        });
+        return;
+      }
+
       // Fetch invoice line items to show in GRN entry form
       const invoiceId = updatedDispatch.invoiceId || pendingDispatch.invoiceId;
       if (invoiceId) {
@@ -834,7 +841,7 @@ export function registerAllActions(
     }
   });
 
-  app.action(/^submit_grn_/, async ({ ack, body, respond, action }) => {
+  app.action(/^submit_grn_(?!form$)/, async ({ ack, body, respond, action }) => {
     await ack();
     try {
       const userId = body.user.id;
@@ -843,50 +850,57 @@ export function registerAllActions(
       const payload = actionId.replace('submit_grn_', '');
       const separatorIdx = payload.indexOf('__');
       const orderId = separatorIdx >= 0 ? payload.slice(0, separatorIdx) : payload;
-      const invoiceId = separatorIdx >= 0 ? payload.slice(separatorIdx + 2) : '';
 
       // Read state values — block_ids: grn_lost_{productId} and grn_dmg_{productId}
       const stateValues = (body as any).state?.values || {};
 
-      // Fetch invoice line items to know all products + ordered quantities
-      const lineItems = await sfClient.getInvoiceLineItems(ctx, invoiceId);
-      if (lineItems.length === 0) {
-        await safeRespond(body, respond, { text: ':x: Could not find invoice items to create GRN.', replace_original: false });
+      const goodsReceiptLines = await sfClient.getGoodsReceiptLines(ctx, orderId);
+      if (goodsReceiptLines.length > 0) {
+        const grnItems = goodsReceiptLines.map((item) => {
+          const lostRaw = stateValues[`grn_lost_${item.lineId}`]?.grn_qty_input?.value;
+          const dmgRaw = stateValues[`grn_dmg_${item.lineId}`]?.grn_qty_input?.value;
+          const lostQty = Math.max(0, parseInt(lostRaw || '0', 10) || 0);
+          const damagedQty = Math.max(0, parseInt(dmgRaw || '0', 10) || 0);
+          const receivedQty = Math.max(0, item.orderedQuantity - lostQty - damagedQty);
+          return { lineId: item.lineId, receivedQty, lostQty, damagedQty };
+        });
+
+        const invalidLine = grnItems.find((item) => {
+          const line = goodsReceiptLines.find((candidate) => candidate.lineId === item.lineId);
+          return line && item.receivedQty + item.lostQty + item.damagedQty > line.orderedQuantity;
+        });
+        if (invalidLine) {
+          const line = goodsReceiptLines.find((candidate) => candidate.lineId === invalidLine.lineId);
+          await safeRespond(body, respond, { text: `:x: For ${line?.productName || 'one product'}, lost/short plus damaged cannot exceed ordered quantity.`, replace_original: false });
+          return;
+        }
+
+        const grn = await sfClient.updateGoodsReceiptLines(ctx, orderId, grnItems);
+        const updatedDetail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
+        if (updatedDetail.remainingQtys.length === 0) {
+          reminderService.deregister(orderId);
+        }
+
+        const confirmItems = goodsReceiptLines.map((item, idx) => ({
+          productName: item.productName,
+          received: grnItems[idx]?.receivedQty ?? item.orderedQuantity,
+          lost: grnItems[idx]?.lostQty ?? 0,
+          damaged: grnItems[idx]?.damagedQty ?? 0,
+        }));
+        const grnBlocks = buildSOGRNConfirmation(grn.grnNumber, orderId, confirmItems);
+
+        if (updatedDetail.canCreateInvoice) {
+          grnBlocks.push(buildDivider());
+          grnBlocks.push(buildSection(`:receipt: *${updatedDetail.remainingQtys.length} product(s) still pending invoice.* You can process another invoice for the remaining quantities.`));
+          grnBlocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice for Remaining', `process_so_invoice_${orderId}`, orderId, 'primary')] });
+        }
+
+        await safeRespond(body, respond, { text: `GRN ${grn.grnNumber} recorded`, blocks: grnBlocks, replace_original: false });
         return;
       }
 
-      const grnItems = lineItems.map((item) => {
-        const lostRaw = stateValues[`grn_lost_${item.productId}`]?.grn_qty_input?.value;
-        const dmgRaw = stateValues[`grn_dmg_${item.productId}`]?.grn_qty_input?.value;
-        const lostQty = Math.max(0, parseInt(lostRaw || '0', 10) || 0);
-        const damagedQty = Math.max(0, parseInt(dmgRaw || '0', 10) || 0);
-        const receivedQty = Math.max(0, item.quantity - lostQty - damagedQty);
-        return { productId: item.productId, receivedQty, lostQty, damagedQty };
-      });
-
-      const grn = await sfClient.createGRNFromDelivery(ctx, orderId, invoiceId, grnItems);
-
-      // Check for remaining uninvoiced items
-      const updatedDetail = await sfClient.getSecondaryOrderDetails(ctx, orderId);
-      if (updatedDetail.remainingQtys.length === 0) {
-        reminderService.deregister(orderId);
-      }
-
-      const confirmItems = lineItems.map((item, idx) => ({
-        productName: item.productName,
-        received: grnItems[idx]?.receivedQty ?? item.quantity,
-        lost: grnItems[idx]?.lostQty ?? 0,
-        damaged: grnItems[idx]?.damagedQty ?? 0,
-      }));
-      const grnBlocks = buildSOGRNConfirmation(grn.grnNumber, orderId, confirmItems);
-
-      if (updatedDetail.canCreateInvoice) {
-        grnBlocks.push(buildDivider());
-        grnBlocks.push(buildSection(`:receipt: *${updatedDetail.remainingQtys.length} product(s) still pending invoice.* You can process another invoice for the remaining quantities.`));
-        grnBlocks.push({ type: 'actions', elements: [buildButton(':receipt: Process Invoice for Remaining', `process_so_invoice_${orderId}`, orderId, 'primary')] });
-      }
-
-      await safeRespond(body, respond, { text: `GRN ${grn.grnNumber} recorded`, blocks: grnBlocks, replace_original: false });
+      await safeRespond(body, respond, { text: ':x: Could not find Salesforce GRN line items for this delivered order.', replace_original: false });
+      return;
     } catch (err) {
       const { userMessage } = pipeline.resolveUserFacingMessage(err);
       await safeRespond(body, respond, { text: userMessage, replace_original: false });
@@ -1322,6 +1336,27 @@ function buildEmptyDashboardMetrics() {
     inventoryAlerts: 0,
     monthlyGrowthPercent: 0,
   };
+}
+
+async function buildDashboardWithCharts(
+  insightsService: InsightsService,
+  reportsService: ReportsService,
+  pipeline: IdentityPipeline,
+  userId: string,
+): Promise<{ blocks: any[] }> {
+  try {
+    const { identity, context: ctx } = await pipeline.resolve(userId);
+    const [metricsResult, insightsResult, reportData] = await Promise.all([
+      insightsService.getDashboardMetrics(ctx).catch(() => ({ success: false as const, error: new Error('failed') })),
+      insightsService.getBusinessInsights(ctx).catch(() => ({ success: false as const, error: new Error('failed') })),
+      reportsService.fetchAllReportData(ctx).catch(() => undefined),
+    ]);
+    const metrics = metricsResult.success ? metricsResult.data : buildEmptyDashboardMetrics();
+    const insights = insightsResult.success ? insightsResult.data : [];
+    return buildDashboardView(identity.displayName, metrics, insights, reportData || undefined);
+  } catch {
+    return buildDashboardView('User', buildEmptyDashboardMetrics(), []);
+  }
 }
 
 function hydrateSelectedFromSlackState(

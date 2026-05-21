@@ -184,6 +184,8 @@ export interface ISalesforceClient {
   getDispatchRequests(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<DispatchRequest[]>;
   updateDispatchStatus(context: ResolvedDistributorContext, dispatchRequestId: string, newStatus: string, correlationId?: string): Promise<DispatchRequest>;
   getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN>;
+  getGoodsReceiptLines(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<GoodsReceiptLine[]>;
+  updateGoodsReceiptLines(context: ResolvedDistributorContext, secondaryOrderId: string, items: Array<{ lineId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
   getInvoiceLineItems(context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>>;
   createGRNFromDelivery(context: ResolvedDistributorContext, orderId: string, invoiceId: string, items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
 
@@ -593,7 +595,7 @@ export interface InventoryAvailability {
 
 export interface InvoicePayload {
   items: Array<{ productId: string; quantity: number }>;
-  fullOrPartial: 'full' | 'partial';
+  fullOrPartial: 'Full' | 'Partial';
   notes: string;
 }
 
@@ -603,6 +605,19 @@ export interface SecondaryOrderGRN {
   secondaryOrderId: string;
   status: string;
   items: Array<{ productId: string; receivedQuantity: number }>;
+}
+
+export interface GoodsReceiptLine {
+  lineId: string;
+  grnId: string;
+  grnNumber: string;
+  productId: string;
+  productName: string;
+  orderedQuantity: number;
+  receivedQuantity: number;
+  lostQuantity: number;
+  damagedQuantity: number;
+  status?: string;
 }
 
 // -- ARS Types --
@@ -702,6 +717,8 @@ export interface ISalesforceClientExtended {
   getDispatchRequests(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<DispatchRequest[]>;
   updateDispatchStatus(context: ResolvedDistributorContext, dispatchRequestId: string, newStatus: string, correlationId?: string): Promise<DispatchRequest>;
   getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN>;
+  getGoodsReceiptLines(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<GoodsReceiptLine[]>;
+  updateGoodsReceiptLines(context: ResolvedDistributorContext, secondaryOrderId: string, items: Array<{ lineId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
   getInvoiceLineItems(context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>>;
   createGRNFromDelivery(context: ResolvedDistributorContext, orderId: string, invoiceId: string, items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>, correlationId?: string): Promise<{ grnId: string; grnNumber: string }>;
 

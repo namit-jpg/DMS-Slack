@@ -2,6 +2,7 @@ import { App } from '@slack/bolt';
 import { SLACK_APP_HOME } from '../../config/slackConstants';
 import { IdentityPipeline } from '../../identity/IdentityPipeline';
 import { InsightsService } from '../../services/InsightsService';
+import { ReportsService } from '../../services/ReportsService';
 import { buildDashboardView } from '../blocks/dashboardBlocks';
 import { createChildLogger } from '../../utils/logger';
 
@@ -18,6 +19,7 @@ export function registerAppHome(
   app: App,
   pipeline: IdentityPipeline,
   insightsService: InsightsService,
+  reportsService: ReportsService,
 ) {
   app.event('app_home_opened', async ({ event, client }) => {
     const userId = event.user;
@@ -75,7 +77,14 @@ export function registerAppHome(
 
       const insights = insightsResult.success ? insightsResult.data : [];
 
-      const view = buildDashboardView(identity.displayName, metrics, insights);
+      let reportData;
+      try {
+        reportData = await reportsService.fetchAllReportData(resolvedCtx);
+      } catch {
+        reportData = undefined;
+      }
+
+      const view = buildDashboardView(identity.displayName, metrics, insights, reportData);
 
       await client.views.publish({
         user_id: userId,

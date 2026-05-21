@@ -7,42 +7,57 @@ import {
 } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { DashboardMetrics, BusinessInsight } from '../../services/InsightsService';
+import { AllReportData } from '../../services/ReportsService';
+import { buildDashboardChartSections } from './reportBlocks';
+
+type Block = any;
 
 export function buildDashboardView(
   userName: string,
   metrics: DashboardMetrics,
   insights: BusinessInsight[],
+  reportData?: AllReportData,
 ) {
-  const blocks = [
+  const blocks: Block[] = [
     buildHeader(`:chart_with_upwards_trend: ${userName}'s Dashboard`),
     buildDivider(),
-    buildSection(
-      `*Monthly Performance*\n` +
-        `:package: Orders This Month: *${metrics.ordersThisMonth}* (Rs ${formatCurrency(metrics.ordersThisMonthValue)})\n` +
-        `:moneybag: Total Order Value: *Rs ${formatCurrency(metrics.totalOrderValue)}*\n` +
-        `:chart_with_upwards_trend: Monthly Growth: *${metrics.monthlyGrowthPercent > 0 ? '+' : ''}${metrics.monthlyGrowthPercent}%*`,
-    ),
-    buildDivider(),
-    buildSection(
-      `*Order Type Split*\n` +
-        `:pencil: Primary: *${metrics.primaryOrders}* orders | Rs ${formatCurrency(metrics.primaryOrderValue)} | Pending: *${metrics.primaryPendingOrders}*\n` +
-        `:twisted_rightwards_arrows: Secondary: *${metrics.secondaryOrders}* orders | Rs ${formatCurrency(metrics.secondaryOrderValue)} | Pending: *${metrics.secondaryPendingOrders}*`,
-    ),
-    buildDivider(),
-    buildSection(
-      `*At a Glance*\n` +
-        `:hourglass_flowing_sand: Pending Orders: *${metrics.pendingOrders}*\n` +
-        `:leftwards_arrow_with_hook: Pending Returns: *${metrics.pendingReturns}*\n` +
-        `:memo: Open Claims: *${metrics.openClaims}*\n` +
-        `:receipt: Unpaid Invoices: *${metrics.unpaidInvoices}*\n` +
-        `:warning: Inventory Alerts: *${metrics.inventoryAlerts}*`,
-    ),
-    buildDivider(),
-    buildSection('*:bulb: Business Insights*'),
-    ...insights.slice(0, 3).map((insight) =>
-      buildSection(`${insightIcon(insight.type)} *${insight.title}*\n${insight.description}`),
-    ),
-    buildDivider(),
+  ];
+
+  if (reportData) {
+    blocks.push(...buildDashboardChartSections(reportData));
+  } else {
+    blocks.push(
+      buildSection(
+        `*Monthly Performance*\n` +
+          `:package: Orders This Month: *${metrics.ordersThisMonth}* (Rs ${formatCurrency(metrics.ordersThisMonthValue)})\n` +
+          `:moneybag: Total Order Value: *Rs ${formatCurrency(metrics.totalOrderValue)}*\n` +
+          `:chart_with_upwards_trend: Monthly Growth: *${metrics.monthlyGrowthPercent > 0 ? '+' : ''}${metrics.monthlyGrowthPercent}%*`,
+      ),
+      buildDivider(),
+      buildSection(
+        `*Order Type Split*\n` +
+          `:pencil: Primary: *${metrics.primaryOrders}* orders | Rs ${formatCurrency(metrics.primaryOrderValue)} | Pending: *${metrics.primaryPendingOrders}*\n` +
+          `:twisted_rightwards_arrows: Secondary: *${metrics.secondaryOrders}* orders | Rs ${formatCurrency(metrics.secondaryOrderValue)} | Pending: *${metrics.secondaryPendingOrders}*`,
+      ),
+      buildDivider(),
+      buildSection(
+        `*At a Glance*\n` +
+          `:hourglass_flowing_sand: Pending Orders: *${metrics.pendingOrders}*\n` +
+          `:leftwards_arrow_with_hook: Pending Returns: *${metrics.pendingReturns}*\n` +
+          `:memo: Open Claims: *${metrics.openClaims}*\n` +
+          `:receipt: Unpaid Invoices: *${metrics.unpaidInvoices}*\n` +
+          `:warning: Inventory Alerts: *${metrics.inventoryAlerts}*`,
+      ),
+      buildDivider(),
+      buildSection('*:bulb: Business Insights*'),
+      ...insights.slice(0, 3).map((insight) =>
+        buildSection(`${insightIcon(insight.type)} *${insight.title}*\n${insight.description}`),
+      ),
+      buildDivider(),
+    );
+  }
+
+  blocks.push(
     buildSection('*Quick Actions*'),
     {
       type: 'actions' as const,
@@ -82,7 +97,7 @@ export function buildDashboardView(
     },
     buildDivider(),
     buildContext([`Updated: ${new Date().toLocaleString()}`]),
-  ];
+  );
 
   return { blocks };
 }

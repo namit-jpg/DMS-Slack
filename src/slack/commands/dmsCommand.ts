@@ -2,6 +2,7 @@ import { App } from '@slack/bolt';
 import { SLACK_COMMANDS } from '../../config/slackConstants';
 import { IdentityPipeline } from '../../identity/IdentityPipeline';
 import { InsightsService } from '../../services/InsightsService';
+import { ReportsService } from '../../services/ReportsService';
 import { buildDashboardView } from '../blocks/dashboardBlocks';
 import { buildUserErrorBlocks } from '../blocks/commonBlocks';
 import { createChildLogger } from '../../utils/logger';
@@ -12,6 +13,7 @@ export function registerDmsCommand(
   app: App,
   pipeline: IdentityPipeline,
   insightsService: InsightsService,
+  reportsService: ReportsService,
 ) {
   app.command(SLACK_COMMANDS.DMS, async ({ command, ack, respond, context }) => {
     await ack();
@@ -63,7 +65,14 @@ export function registerDmsCommand(
 
       const insights = insightsResult.success ? insightsResult.data : [];
 
-      const view = buildDashboardView(identity.displayName, metrics, insights);
+      let reportData;
+      try {
+        reportData = await reportsService.fetchAllReportData(resolvedCtx);
+      } catch {
+        reportData = undefined;
+      }
+
+      const view = buildDashboardView(identity.displayName, metrics, insights, reportData);
       await respond(view);
     } catch (err) {
       log.error({ err }, 'Error handling /dms command');

@@ -441,6 +441,25 @@ export class MockSalesforceClient implements ISalesforceClient {
     return { grnId: 'grnSO001', grnNumber: 'GRN-SO-0001', secondaryOrderId: orderId, status: 'Completed', items: [{ productId: '01tMOCK000000001', receivedQuantity: 30 }] };
   }
 
+  async getGoodsReceiptLines(_ctx: ResolvedDistributorContext, _orderId: string): Promise<Array<{ lineId: string; grnId: string; grnNumber: string; productId: string; productName: string; orderedQuantity: number; receivedQuantity: number; lostQuantity: number; damagedQuantity: number; status?: string }>> {
+    return MOCK_PRODUCTS.slice(0, 2).map((p, idx) => ({
+      lineId: `grnLineMOCK${idx + 1}`,
+      grnId: 'grnSO001',
+      grnNumber: 'GRN-SO-0001',
+      productId: p.Id as string,
+      productName: p.Name as string,
+      orderedQuantity: 20,
+      receivedQuantity: 0,
+      lostQuantity: 0,
+      damagedQuantity: 0,
+      status: 'New',
+    }));
+  }
+
+  async updateGoodsReceiptLines(_ctx: ResolvedDistributorContext, _orderId: string, _items: Array<{ lineId: string; receivedQty: number; lostQty: number; damagedQty: number }>): Promise<{ grnId: string; grnNumber: string }> {
+    return { grnId: 'grnSO001', grnNumber: 'GRN-SO-0001' };
+  }
+
   async getInvoiceLineItems(_ctx: ResolvedDistributorContext, invoiceId: string): Promise<Array<{ productId: string; productName: string; quantity: number }>> {
     return MOCK_PRODUCTS.slice(0, 2).map((p) => ({
       productId: p.Id as string,

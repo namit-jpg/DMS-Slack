@@ -6,6 +6,7 @@ import { DistributorResolver } from './identity/DistributorResolver';
 import { AuthorizationService } from './identity/AuthorizationService';
 import { IdentityPipeline } from './identity/IdentityPipeline';
 import { InsightsService } from './services/InsightsService';
+import { ReportsService } from './services/ReportsService';
 import { PartialOrderReminderService } from './services/PartialOrderReminderService';
 import { registerDmsCommand } from './slack/commands/dmsCommand';
 import { registerAppHome } from './slack/appHome/publishHome';
@@ -19,6 +20,7 @@ export function createApp(sfClient: ISalesforceClient): { app: App; reminderServ
   const authService = new AuthorizationService(sfClient);
 
   const insightsService = new InsightsService(sfClient);
+  const reportsService = new ReportsService(sfClient);
 
   const config: Record<string, unknown> = {};
 
@@ -41,8 +43,8 @@ export function createApp(sfClient: ISalesforceClient): { app: App; reminderServ
 
   const reminderService = new PartialOrderReminderService(app.client.chat as any);
 
-  registerDmsCommand(app, pipeline, insightsService);
-  registerAppHome(app, pipeline, insightsService);
+  registerDmsCommand(app, pipeline, insightsService, reportsService);
+  registerAppHome(app, pipeline, insightsService, reportsService);
   registerAllActions(app, pipeline, sfClient, insightsService, reminderService);
 
   appLogger.info('DMS/SFA Slack App initialized');

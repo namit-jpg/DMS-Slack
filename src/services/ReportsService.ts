@@ -97,7 +97,7 @@ export class ReportsService {
         Total_Amount__c: number;
         Amount__c: number;
       }>(
-        `SELECT Status__c, Total_Amount__c, Amount__c FROM Claim__c WHERE Account__c = '${accountId}' LIMIT 200`,
+        `SELECT Status__c, Total_Amount__c, Amount__c FROM Claim__c WHERE Order__c IN (SELECT Id FROM Order WHERE AccountId = '${accountId}' OR Distributor_Account__c = '${accountId}') LIMIT 200`,
       ),
       this.sfClient.query<{
         Id: string;

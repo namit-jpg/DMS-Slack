@@ -38,6 +38,7 @@ import {
 import { SalesforceAuth } from './SalesforceAuth';
 import { createChildLogger } from '../utils/logger';
 import { SalesforceError } from '../utils/errors';
+import { invalidateCliToken } from './SalesforceCliAuth';
 
 const logger = createChildLogger('SalesforceRestClient');
 
@@ -74,6 +75,35 @@ export class SalesforceRestClient implements ISalesforceClient {
     return this.auth.getToken();
   }
 
+  private async sfFetchWithRetry(url: string, init: RequestInit = {}, correlationId?: string): Promise<Response> {
+    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
+    const token = await this.getToken();
+    const headers: Record<string, string> = { ...(init.headers as Record<string, string> || {}) };
+    if (!headers.Authorization) {
+      headers.Authorization = `Bearer ${token.accessToken}`;
+    }
+    if (!headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await sfFetch(url, { ...init, headers });
+
+    if (response.status === 401) {
+      const body = await response.text();
+      const isInvalidSession = body.includes('INVALID_SESSION_ID');
+      if (isInvalidSession && this.cliToken) {
+        log.warn('SF CLI token expired — invalidating and fetching fresh token');
+        invalidateCliToken();
+        const freshToken = await this.getToken();
+        headers.Authorization = `Bearer ${freshToken.accessToken}`;
+        return sfFetch(url, { ...init, headers });
+      }
+      return new Response(body, { status: 401, headers: response.headers });
+    }
+
+    return response;
+  }
+
   isMock(): boolean { return false; }
 
   async query<T = SalesforceRecord>(soql: string, correlationId?: string): Promise<SalesforceQueryResult<T>> {
@@ -82,12 +112,12 @@ export class SalesforceRestClient implements ISalesforceClient {
     const encodedQuery = encodeURIComponent(soql);
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/query/?q=${encodedQuery}`;
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
       },
-    });
+    }, correlationId);
 
     if (!response.ok) {
       const body = await response.text();
@@ -111,21 +141,18 @@ export class SalesforceRestClient implements ISalesforceClient {
       return rows;
     }
 
-    let nextUrl = rows.nextRecordsUrl;
-    while (nextUrl) {
-      const token = await this.getToken();
-      const response = await sfFetch(
-        `${token.instanceUrl}${nextUrl}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token.accessToken}`,
-          },
-        },
-      );
+      let nextUrl = rows.nextRecordsUrl;
+      while (nextUrl) {
+        const token = await this.getToken();
+        const response = await this.sfFetchWithRetry(
+          `${token.instanceUrl}${nextUrl}`,
+          { headers: { Authorization: `Bearer ${token.accessToken}` } },
+          correlationId,
+        );
 
-      if (!response.ok) {
-        throw new SalesforceError(`SOQL queryAll failed: ${response.statusText}`);
-      }
+        if (!response.ok) {
+          throw new SalesforceError(`SOQL queryAll failed: ${response.statusText}`);
+        }
 
       const more = (await response.json()) as SalesforceQueryResult<T>;
       rows.records = rows.records.concat(more.records);
@@ -150,14 +177,14 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}`;
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(fields),
-    });
+    }, correlationId);
 
     if (!response.ok) {
       const body = await response.text();
@@ -198,14 +225,14 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/${id}`;
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       method: 'PATCH',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(fields),
-    });
+    }, correlationId);
 
     if (!response.ok) {
       const body = await response.text();
@@ -229,12 +256,12 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/${id}`;
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
       },
-    });
+    }, correlationId);
 
     if (!response.ok) {
       const body = await response.text();
@@ -257,12 +284,12 @@ export class SalesforceRestClient implements ISalesforceClient {
     const token = await this.getToken();
     const url = `${token.instanceUrl}/services/data/${this.apiVersion}/sobjects/${objectName}/describe`;
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
       },
-    });
+    }, correlationId);
 
     if (!response.ok) {
       throw new SalesforceError(`Describe ${objectName} failed: ${response.statusText}`);
@@ -288,12 +315,12 @@ export class SalesforceRestClient implements ISalesforceClient {
       url += `?fields=${fields.join(',')}`;
     }
 
-    const response = await sfFetch(url, {
+    const response = await this.sfFetchWithRetry(url, {
       headers: {
         Authorization: `Bearer ${token.accessToken}`,
         'Content-Type': 'application/json',
       },
-    });
+    }, correlationId);
 
     if (!response.ok) {
       throw new SalesforceError(`Get ${objectName}/${id} failed`, {
@@ -727,7 +754,7 @@ export class SalesforceRestClient implements ISalesforceClient {
               ? 'Short Supply'
               : 'Good';
         await this.createGRNLineWithFallback({
-          GRN__c: grnHeaderId,
+          Goods_Receipt_Note__c: grnHeaderId,
           Product__c: item.productId,
           Order_Type__c: orderType,
           Quantity__c: item.expectedQuantity,
@@ -779,7 +806,7 @@ export class SalesforceRestClient implements ISalesforceClient {
   private async createGRNFromInvoice(orderId: string, invoiceId: string, correlationId?: string): Promise<string> {
     const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
     const linesResult = await this.query<{ Id: string; Product__c?: string; Quantity__c?: number }>(
-      `SELECT Id, Product__c, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice__c = '${escapeSoql(invoiceId)}' AND Product__c != null`,
+      `SELECT Id, Product__c, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice_Custom__c = '${escapeSoql(invoiceId)}' AND Product__c != null`,
       correlationId,
     );
     if (linesResult.records.length === 0) {
@@ -800,7 +827,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       const qty = line.Quantity__c || 0;
       if (qty <= 0 || !line.Product__c) continue;
       await this.createGRNLineWithFallback({
-        GRN__c: grnHeaderId,
+        Goods_Receipt_Note__c: grnHeaderId,
         Product__c: line.Product__c,
         Order_Type__c: orderType,
         Quantity__c: qty,
@@ -1016,7 +1043,7 @@ export class SalesforceRestClient implements ISalesforceClient {
           `SELECT Id, Status__c FROM Dispatch_Request__c WHERE Order__c = '${escapedId}' ORDER BY CreatedDate DESC LIMIT 20`,
           correlationId,
         ).then((res) => res.records),
-        this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId),
+        this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId),
         this.getFulfilledQtyByProduct(r.Id, correlationId),
         this.getShippingAddress(r.AccountId, correlationId),
       ]);
@@ -1121,12 +1148,12 @@ export class SalesforceRestClient implements ISalesforceClient {
         const unitPrice = priceMap.get(item.productId) || 0;
         try {
           await this.create('Invoice_Line_Item__c', {
-            Invoice__c: invoiceId,
+            Invoice_Custom__c: invoiceId,
             Product__c: item.productId,
             Quantity__c: item.quantity,
             Unit_Price__c: unitPrice,
-            Amount__c: unitPrice * item.quantity,
-            Status__c: 'Active',
+            Total_Price__c: unitPrice * item.quantity,
+            Total_Amount_with_Tax__c: unitPrice * item.quantity,
           }, correlationId);
         } catch (lineErr) {
           log.warn({ err: lineErr, productId: item.productId }, 'Invoice line item creation failed — invoice header intact');
@@ -1278,25 +1305,93 @@ export class SalesforceRestClient implements ISalesforceClient {
 
   async getSecondaryOrderGRN(context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<SecondaryOrderGRN> {
     try {
-      const result = await this.query<{ Id: string; Name: string; Status__c: string }>(
-        `SELECT Id, Name, Status__c FROM GRN__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 1`,
+      const result = await this.query<{ Id: string; Name: string; GRN_Status__c?: string; Status__c?: string }>(
+        `SELECT Id, Name, GRN_Status__c, Status__c FROM Goods_Receipt__c WHERE Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY CreatedDate DESC LIMIT 1`,
         correlationId,
       );
       if (result.records.length === 0) {
         throw new SalesforceError('No GRN found for this secondary order', { userMessage: 'No GRN found for this secondary order.' });
       }
       const r = result.records[0];
-      return { grnId: r.Id, grnNumber: r.Name, secondaryOrderId, status: r.Status__c, items: [] };
+      return { grnId: r.Id, grnNumber: r.Name, secondaryOrderId, status: r.GRN_Status__c || r.Status__c || 'New', items: [] };
     } catch (err) {
       if (err instanceof SalesforceError) throw err;
       throw new SalesforceError('Secondary order GRN fetch failed', { userMessage: 'Unable to load GRN details.' });
     }
   }
 
+  async getGoodsReceiptLines(_context: ResolvedDistributorContext, secondaryOrderId: string, correlationId?: string): Promise<Array<{ lineId: string; grnId: string; grnNumber: string; productId: string; productName: string; orderedQuantity: number; receivedQuantity: number; lostQuantity: number; damagedQuantity: number; status?: string }>> {
+    try {
+      const result = await this.query<{
+        Id: string;
+        Goods_Receipt_Note__c: string;
+        Goods_Receipt_Note__r?: { Name?: string };
+        Product__c?: string;
+        Product__r?: { Name?: string };
+        Quantity_Ordered__c?: number;
+        Quantity_Received__c?: number;
+        Short_Quantity__c?: number;
+        Damage_Quantity__c?: number;
+        GRN_Line_Status__c?: string;
+        Status__c?: string;
+      }>(
+        `SELECT Id, Goods_Receipt_Note__c, Goods_Receipt_Note__r.Name, Product__c, Product__r.Name, Quantity_Ordered__c, Quantity_Received__c, Short_Quantity__c, Damage_Quantity__c, GRN_Line_Status__c, Status__c FROM GRN_Line__c WHERE Goods_Receipt_Note__r.Order__c = '${escapeSoql(secondaryOrderId)}' ORDER BY Product__c, CreatedDate ASC`,
+        correlationId,
+      );
+      return result.records
+        .filter((r) => r.Goods_Receipt_Note__c && r.Product__c && (r.Quantity_Ordered__c || 0) > 0)
+        .map((r) => ({
+          lineId: r.Id,
+          grnId: r.Goods_Receipt_Note__c,
+          grnNumber: r.Goods_Receipt_Note__r?.Name || r.Goods_Receipt_Note__c,
+          productId: r.Product__c as string,
+          productName: r.Product__r?.Name || r.Product__c as string,
+          orderedQuantity: r.Quantity_Ordered__c || 0,
+          receivedQuantity: r.Quantity_Received__c || 0,
+          lostQuantity: r.Short_Quantity__c || 0,
+          damagedQuantity: r.Damage_Quantity__c || 0,
+          status: r.GRN_Line_Status__c || r.Status__c,
+        }));
+    } catch (err) {
+      if (err instanceof SalesforceError) throw err;
+      throw new SalesforceError('Goods receipt lines fetch failed', { userMessage: 'Unable to load GRN line items.' });
+    }
+  }
+
+  async updateGoodsReceiptLines(
+    context: ResolvedDistributorContext,
+    secondaryOrderId: string,
+    items: Array<{ lineId: string; receivedQty: number; lostQty: number; damagedQty: number }>,
+    correlationId?: string,
+  ): Promise<{ grnId: string; grnNumber: string }> {
+    const lines = await this.getGoodsReceiptLines(context, secondaryOrderId, correlationId);
+    const lineById = new Map(lines.map((line) => [line.lineId, line]));
+    let grnId = '';
+    let grnNumber = '';
+    for (const item of items) {
+      const line = lineById.get(item.lineId);
+      if (!line) {
+        throw new SalesforceError('GRN line not found for this order', { userMessage: 'Unable to update GRN because one line item no longer belongs to this order.' });
+      }
+      const totalQty = item.receivedQty + item.lostQty + item.damagedQty;
+      if (totalQty > line.orderedQuantity) {
+        throw new SalesforceError('GRN quantity exceeds ordered quantity', { userMessage: `For ${line.productName}, received + lost/short + damaged cannot exceed ordered quantity (${line.orderedQuantity}).` });
+      }
+      grnId = line.grnId;
+      grnNumber = line.grnNumber;
+      await this.update('GRN_Line__c', item.lineId, {
+        Quantity_Received__c: item.receivedQty,
+        Short_Quantity__c: item.lostQty,
+        Damage_Quantity__c: item.damagedQty,
+      }, correlationId);
+    }
+    return { grnId, grnNumber };
+  }
+
   async getInvoiceLineItems(_context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>> {
     try {
       const result = await this.query<{ Id: string; Product__c?: string; Product__r?: { Name?: string }; Quantity__c?: number }>(
-        `SELECT Id, Product__c, Product__r.Name, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice__c = '${escapeSoql(invoiceId)}' AND Product__c != null ORDER BY CreatedDate ASC`,
+        `SELECT Id, Product__c, Product__r.Name, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice_Custom__c = '${escapeSoql(invoiceId)}' AND Product__c != null ORDER BY CreatedDate ASC`,
         correlationId,
       );
       return result.records
@@ -1336,7 +1431,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       for (const item of validItems) {
         const totalQty = item.receivedQty + item.lostQty + item.damagedQty;
         await this.createGRNLineWithFallback({
-          GRN__c: grnHeaderId,
+          Goods_Receipt_Note__c: grnHeaderId,
           Product__c: item.productId,
           Order_Type__c: 'Secondary',
           Quantity__c: totalQty,
@@ -1506,7 +1601,7 @@ export class SalesforceRestClient implements ISalesforceClient {
     const map = new Map<string, number>();
     try {
       const result = await this.query<{ Product__c: string; totalQty: number }>(
-        `SELECT Product__c, SUM(Quantity__c) totalQty FROM Invoice_Line_Item__c WHERE Invoice__r.Order__c = '${escapeSoql(orderId)}' GROUP BY Product__c`,
+        `SELECT Product__c, SUM(Quantity__c) totalQty FROM Invoice_Line_Item__c WHERE Invoice_Custom__r.Order__c = '${escapeSoql(orderId)}' GROUP BY Product__c`,
         correlationId,
       );
       result.records.forEach((r) => map.set(r.Product__c, r.totalQty || 0));
