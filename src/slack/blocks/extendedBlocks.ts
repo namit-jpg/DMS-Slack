@@ -1,7 +1,7 @@
 import { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
-import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { formatDate, formatCurrency, formatDateTime } from '../../utils/formatters';
 
 type Block = any;
 
@@ -29,7 +29,7 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
       const dispEmoji = o.dispatchStatus === 'Delivered' ? ':truck:' : o.dispatchStatus === 'Pending' ? ':package:' : ':hourglass:';
       blocks.push({
         type: 'section',
-        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${formatCurrency(o.totalAmount)} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'} | Date: ${o.orderDate || 'N/A'}` },
+        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${formatCurrency(o.totalAmount)} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'} | Date: ${o.orderDate ? formatDate(o.orderDate) : 'N/A'}` },
         accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());
@@ -48,7 +48,7 @@ export function buildSecondaryOrderDetail(detail: SecondaryOrderDetail): Block[]
     buildHeader(`:twisted_rightwards_arrows: SO ${detail.orderNumber}`),
     buildSection(`*Retailer:* ${detail.retailerCustomer}\n*Status:* ${detail.status}\n*Invoice:* ${detail.invoiceStatus}\n*Dispatch:* ${detail.dispatchStatus}\n${fulfillEmoji} *Fulfillment:* ${detail.fulfillmentStatus}\n*Amount:* Rs ${formatCurrency(detail.totalAmount)}`),
     buildDivider(),
-    buildSection(`*From:* ${detail.sourceAddress || 'Distributor Warehouse'}\n*To:* ${detail.destinationAddress || 'Retailer Address'}${detail.requestedDeliveryDate ? `\n*Requested Delivery:* ${detail.requestedDeliveryDate}` : ''}`),
+    buildSection(`*From:* ${detail.sourceAddress || 'Distributor Warehouse'}\n*To:* ${detail.destinationAddress || 'Retailer Address'}${detail.requestedDeliveryDate ? `\n*Requested Delivery:* ${formatDate(detail.requestedDeliveryDate)}` : ''}`),
     buildDivider(),
     buildSection(`*Products (${detail.items.length})*`),
   ];
@@ -97,7 +97,7 @@ export function buildInvoiceProcessing(orderId: string, availability: InventoryA
       : ':white_check_mark: Fully available';
     blocks.push(buildSection(`*${idx + 1}. ${a.productName}*\nPending: ${a.orderedQuantity} | In Stock: ${a.availableQuantity} | To Invoice: *${a.availableQuantity}* \u2014 ${statusText}`));
     a.batchDetails.filter((b) => b.quantity > 0).forEach((b) => {
-      blocks.push(buildSection(`  _Batch \u2026${b.batchId.slice(-4)}: ${b.quantity} units${b.expiryDate ? ` (exp. ${b.expiryDate})` : ''}_`));
+      blocks.push(buildSection(`  _Batch \u2026${b.batchId.slice(-4)}: ${b.quantity} units${b.expiryDate ? ` (exp. ${formatDate(b.expiryDate)})` : ''}_`));
     });
   });
 
@@ -223,7 +223,7 @@ export function buildGRNConfirmation(grnNumber: string, orderId: string, items: 
 export function buildDispatchStatusBlocks(dispatches: DispatchRequest[]): Block[] {
   if (dispatches.length === 0) return [buildHeader(':truck: Dispatch Status'), buildSection('No dispatch requests found.'), { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] }];
   const blocks: Block[] = [buildHeader(':truck: Dispatch Status'), buildDivider()];
-  dispatches.forEach((d) => blocks.push(buildSection(`*${d.dispatchName}* \u2014 Status: ${d.status}\nFrom: ${d.sourceAddress}\nTo: ${d.destinationAddress}\n${d.startDate || ''} \u2192 ${d.endDate || ''}`)));
+  dispatches.forEach((d) => blocks.push(buildSection(`*${d.dispatchName}* \u2014 Status: ${d.status}\nFrom: ${d.sourceAddress}\nTo: ${d.destinationAddress}\n${d.startDate ? formatDate(d.startDate) : ''} \u2192 ${d.endDate ? formatDate(d.endDate) : ''}`)));
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }
@@ -285,7 +285,7 @@ export function buildARSOrdersList(orders: ArsTriggeredOrder[]): Block[] {
   } else {
     blocks.push(buildSection(`*${orders.length} order(s)*`));
     orders.forEach((o) => blocks.push(buildSection(
-      `*${o.orderNumber}* — ${o.productName}\nQty: ${o.quantity} | Trigger: ${o.reason}\nStatus: ${o.status} | Date: ${o.triggerDate}`,
+      `*${o.orderNumber}* — ${o.productName}\nQty: ${o.quantity} | Trigger: ${o.reason}\nStatus: ${o.status} | Date: ${o.triggerDate ? formatDate(o.triggerDate) : 'N/A'}`,
     )));
   }
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to ARS', 'ars_menu', 'back')] });

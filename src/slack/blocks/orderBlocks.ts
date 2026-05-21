@@ -105,7 +105,7 @@ export function buildOrderQuoteReview(quote: PrimaryOrderQuote): Block[] {
 export function buildOrderConfirmation(order: PrimaryOrder): Block[] {
   return [
     buildHeader(':white_check_mark: Order Created Successfully!'),
-    buildSection(`*Order Number:* ${order.orderNumber}\n*Status:* ${order.status}\n*Date:* ${order.orderDate}\n*Grand Total:* Rs ${formatCurrency(order.grandTotal)}`),
+    buildSection(`*Order Number:* ${order.orderNumber}\n*Status:* ${order.status}\n*Date:* ${formatDate(order.orderDate)}\n*Grand Total:* Rs ${formatCurrency(order.grandTotal)}`),
     buildDivider(),
     buildSection(`*Items (${order.items.length})*`),
     ...order.items.map((li) => buildSection(`*${li.productName}* \u2014 ${li.quantity} x Rs ${formatCurrency(li.unitPrice)} = Rs ${formatCurrency(li.totalPrice)}`)),
@@ -144,7 +144,7 @@ export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): B
       const emoji = o.status === 'Approved' ? ':white_check_mark:' : o.status === 'Pending' ? ':hourglass_flowing_sand:' : o.status === 'Draft' ? ':pencil2:' : ':grey_question:';
       blocks.push({
         type: 'section',
-        text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${formatCurrency(o.grandTotal)} | Date: ${o.orderDate}\nApproval: ${o.approvalStatus || 'N/A'}` },
+        text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${formatCurrency(o.grandTotal)} | Date: ${formatDate(o.orderDate)}\nApproval: ${o.approvalStatus || 'N/A'}` },
         accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_po_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());
@@ -157,7 +157,7 @@ export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): B
 export function buildOrderDetailBlocks(detail: PrimaryOrderDetail): Block[] {
   const blocks: Block[] = [
     buildHeader(`:clipboard: Order ${detail.orderNumber}`),
-    buildSection(`*Status:* ${detail.status}\n*Fulfillment:* ${detail.fulfillmentStatus}\n*Approval:* ${detail.approvalStatus || 'N/A'}\n*Date:* ${detail.orderDate}`),
+    buildSection(`*Status:* ${detail.status}\n*Fulfillment:* ${detail.fulfillmentStatus}\n*Approval:* ${detail.approvalStatus || 'N/A'}\n*Date:* ${formatDate(detail.orderDate)}`),
     buildDivider(),
     buildSection(`*Financials*\nSubtotal: Rs ${formatCurrency(detail.totalAmount)}\nScheme Discount: Rs ${formatCurrency(detail.schemeDiscount)}\nCredit Applied: Rs ${formatCurrency(detail.creditApplied || 0)}\nGrand Total: Rs ${formatCurrency(detail.grandTotal)}`),
     buildDivider(),
