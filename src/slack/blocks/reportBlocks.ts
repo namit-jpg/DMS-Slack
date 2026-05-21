@@ -2,12 +2,9 @@ import { AllReportData, MonthlyPerformanceData, SalesMixData, AgingData, ClaimsD
 import { buildQuickChartUrl } from '../../utils/quickChart';
 import { buildHeader, buildSection, buildDivider, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
+import { formatCurrency as fmt } from '../../utils/formatters';
 
 type Block = any;
-
-function fmt(n: number): string {
-  return n.toLocaleString('en-IN');
-}
 
 function chartImage(url: string, altText: string): Block {
   return { type: 'image', image_url: url, alt_text: altText };

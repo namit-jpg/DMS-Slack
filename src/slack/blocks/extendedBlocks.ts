@@ -1,6 +1,7 @@
 import { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
+import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 type Block = any;
 
@@ -28,7 +29,7 @@ export function buildSecondaryOrderList(orders: SecondaryOrder[], searchTerm = '
       const dispEmoji = o.dispatchStatus === 'Delivered' ? ':truck:' : o.dispatchStatus === 'Pending' ? ':package:' : ':hourglass:';
       blocks.push({
         type: 'section',
-        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'} | Date: ${o.orderDate || 'N/A'}` },
+        text: { type: 'mrkdwn', text: `*${o.orderNumber}* \u2014 ${o.retailerCustomer}\nStatus: ${o.status} | ${invEmoji} Invoice: ${o.invoiceStatus || 'Pending'} | ${dispEmoji} Dispatch: ${o.dispatchStatus || 'Pending'}\nAmount: Rs ${formatCurrency(o.totalAmount)} | Fulfillment: ${o.fulfillmentStatus || 'Not Fulfilled'} | Date: ${o.orderDate || 'N/A'}` },
         accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_so_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());
@@ -45,7 +46,7 @@ export function buildSecondaryOrderDetail(detail: SecondaryOrderDetail): Block[]
 
   const blocks: Block[] = [
     buildHeader(`:twisted_rightwards_arrows: SO ${detail.orderNumber}`),
-    buildSection(`*Retailer:* ${detail.retailerCustomer}\n*Status:* ${detail.status}\n*Invoice:* ${detail.invoiceStatus}\n*Dispatch:* ${detail.dispatchStatus}\n${fulfillEmoji} *Fulfillment:* ${detail.fulfillmentStatus}\n*Amount:* Rs ${detail.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildSection(`*Retailer:* ${detail.retailerCustomer}\n*Status:* ${detail.status}\n*Invoice:* ${detail.invoiceStatus}\n*Dispatch:* ${detail.dispatchStatus}\n${fulfillEmoji} *Fulfillment:* ${detail.fulfillmentStatus}\n*Amount:* Rs ${formatCurrency(detail.totalAmount)}`),
     buildDivider(),
     buildSection(`*From:* ${detail.sourceAddress || 'Distributor Warehouse'}\n*To:* ${detail.destinationAddress || 'Retailer Address'}${detail.requestedDeliveryDate ? `\n*Requested Delivery:* ${detail.requestedDeliveryDate}` : ''}`),
     buildDivider(),
@@ -124,7 +125,7 @@ export function buildInvoiceConfirmation(invoice: DMSInvoice, dispatches: Dispat
   const typeLabel = invoice.fullPartial === 'partial' ? ':warning: Partial Invoice' : ':white_check_mark: Full Invoice';
   const blocks: Block[] = [
     buildHeader(':white_check_mark: Invoice Generated'),
-    buildSection(`*Invoice:* ${invoice.invoiceNumber}\n*Type:* ${typeLabel}\n*Status:* ${invoice.status}\n*Amount:* Rs ${(invoice.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildSection(`*Invoice:* ${invoice.invoiceNumber}\n*Type:* ${typeLabel}\n*Status:* ${invoice.status}\n*Amount:* Rs ${formatCurrency(invoice.totalAmount || 0)}`),
     buildDivider(),
   ];
 
@@ -401,7 +402,7 @@ export function buildARSChangeRequestForm(productInfo: { productId: string; prod
 export function buildARSApprovalMessage(userName: string, accountName: string, changes: Array<{ productName: string; oldMin: number; newMin: number; oldMax: number; newMax: number }>): Block[] {
   const blocks: Block[] = [
     buildHeader(':gear: ARS Settings Change Request'),
-    buildSection(`*Requested by:* ${userName}\n*Distributor:* ${accountName}\n*Timestamp:* ${new Date().toLocaleString()}`),
+    buildSection(`*Requested by:* ${userName}\n*Distributor:* ${accountName}\n*Timestamp:* ${formatDateTime()}`),
     buildDivider(),
     buildSection('*Requested Changes:*'),
   ];
@@ -448,7 +449,7 @@ export function buildAIInsightsDashboard(insights: AIBusinessInsight[], recommen
 
   if (upsells.length > 0) {
     blocks.push(buildSection('*Growth Recommendations*'));
-    upsells.forEach((u) => blocks.push(buildSection(`:dart: *${u.retailerName}* \u2192 ${u.productName}\n${u.reason}\nOpportunity Score: ${u.opportunityScore}/100 | Est. Revenue: Rs ${u.estimatedRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)));
+    upsells.forEach((u) => blocks.push(buildSection(`:dart: *${u.retailerName}* \u2192 ${u.productName}\n${u.reason}\nOpportunity Score: ${u.opportunityScore}/100 | Est. Revenue: Rs ${formatCurrency(u.estimatedRevenue)}`)));
   }
 
   blocks.push(buildDivider());

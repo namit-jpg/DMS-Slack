@@ -1,5 +1,6 @@
 import { ISalesforceClient, ResolvedDistributorContext } from '../salesforce/types';
 import { createChildLogger } from '../utils/logger';
+import { formatDateTime } from '../utils/formatters';
 
 const logger = createChildLogger('ReportsService');
 
@@ -122,7 +123,7 @@ export class ReportsService {
       aging: this.processAging(orders),
       claims: this.processClaims(claims),
       inventory: this.processInventory(inventory),
-      generatedAt: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      generatedAt: formatDateTime(),
     };
   }
 
@@ -233,7 +234,7 @@ export class ReportsService {
         ],
         statusCounts: { Active: 2, Low: 2, Expired: 1 },
       },
-      generatedAt: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      generatedAt: formatDateTime(),
     };
   }
 }

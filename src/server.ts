@@ -8,6 +8,7 @@ import { DistributorResolver } from './identity/DistributorResolver';
 import { SecondaryOrderPoller } from './services/SecondaryOrderPoller';
 import { getBlockersByFeature, BLOCKERS } from './salesforce/blockers';
 import { getDefaultFeatureFlags } from './config/featureFlags';
+import { formatCurrency } from './utils/formatters';
 
 async function main() {
   logger.info('Starting DMS/SFA Slack Application...');
@@ -60,7 +61,7 @@ async function main() {
         const salesChannel = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
         await app.client.chat.postMessage({
           channel: salesChannel,
-          text: `:twisted_rightwards_arrows: New Secondary Order: *${order.orderNumber}*${partialNote}\nRetailer: ${order.retailerCustomer}\nAmount: Rs ${order.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nStatus: ${order.status} | Invoice: ${order.invoiceStatus || 'N/A'} | Fulfillment: ${order.fulfillmentStatus || 'N/A'}`,
+          text: `:twisted_rightwards_arrows: New Secondary Order: *${order.orderNumber}*${partialNote}\nRetailer: ${order.retailerCustomer}\nAmount: Rs ${formatCurrency(order.totalAmount)}\nStatus: ${order.status} | Invoice: ${order.invoiceStatus || 'N/A'} | Fulfillment: ${order.fulfillmentStatus || 'N/A'}`,
         });
       } catch { logger.warn('Could not deliver secondary order notification to #sales'); }
     },

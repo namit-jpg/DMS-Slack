@@ -9,6 +9,7 @@ import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { DashboardMetrics, BusinessInsight } from '../../services/InsightsService';
 import { AllReportData } from '../../services/ReportsService';
 import { buildDashboardChartSections } from './reportBlocks';
+import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 type Block = any;
 
@@ -96,15 +97,12 @@ export function buildDashboardView(
       ],
     },
     buildDivider(),
-    buildContext([`Updated: ${new Date().toLocaleString()}`]),
+    buildContext([`Updated: ${formatDateTime()}`]),
   );
 
   return { blocks };
 }
 
-function formatCurrency(amount: number): string {
-  return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function insightIcon(type: string): string {
   switch (type) {

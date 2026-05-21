@@ -1,6 +1,7 @@
 import { DMSProduct, PrimaryOrderQuote, PrimaryOrder, PrimaryOrderDetail, GRNPayload, GRNResult, ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, ApprovalResult, CreditNote } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
+import { formatDate, formatCurrency } from '../../utils/formatters';
 
 type Block = any;
 
@@ -14,7 +15,7 @@ export function buildProductSelectionModal(
     selected.forEach((s, idx) => {
       const p = products.find((pp) => pp.productId === s.productId);
       const qty = Math.max(1, s.quantity || p?.minOrderQtyPrimary || 1);
-      blocks.push(buildSection(`*${idx + 1}. ${p?.productName || s.productId}* (${p?.productCode || ''})\nUnit price: Rs ${p ? p.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'} | Estimated line: Rs ${p ? (p.unitPrice * qty).toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '0.00'}`));
+      blocks.push(buildSection(`*${idx + 1}. ${p?.productName || s.productId}* (${p?.productCode || ''})\nUnit price: Rs ${p ? formatCurrency(p.unitPrice) : '0'} | Estimated line: Rs ${p ? formatCurrency(p.unitPrice * qty) : '0'}`));
       blocks.push({
         type: 'input',
         block_id: `qty_${s.productId}`,
@@ -39,7 +40,7 @@ export function buildProductSelectionModal(
   products.slice(0, 10).forEach((p) => {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*${p.productName}* (${p.productCode})\n${p.family} | Unit: ${p.unitOfMeasure} | Rs ${p.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}/unit | Min Qty: ${p.minOrderQtyPrimary ?? 'No minimum'}` },
+      text: { type: 'mrkdwn', text: `*${p.productName}* (${p.productCode})\n${p.family} | Unit: ${p.unitOfMeasure} | Rs ${formatCurrency(p.unitPrice)}/unit | Min Qty: ${p.minOrderQtyPrimary ?? 'No minimum'}` },
       accessory: { type: 'button', text: { type: 'plain_text', text: 'Add', emoji: true }, action_id: `add_product_${p.productId}`, value: p.productId },
     });
     blocks.push(buildDivider());
@@ -51,20 +52,20 @@ export function buildProductSelectionModal(
 export function buildOrderQuoteReview(quote: PrimaryOrderQuote): Block[] {
   const blocks: Block[] = [
     buildHeader(':receipt: Order Quote Review'),
-    buildSection(`*Quote ID:* ${quote.quoteId}\n*Currency:* ${quote.currency}\n*Valid until:* ${new Date(quote.expiresAt).toLocaleTimeString()}`),
+    buildSection(`*Quote ID:* ${quote.quoteId}\n*Currency:* ${quote.currency}\n*Valid until:* ${new Date(quote.expiresAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}`),
     buildDivider(),
   ];
   quote.lineItems.forEach((li, idx) => {
-    blocks.push(buildSection(`*${idx + 1}. ${li.productName}* (${li.productCode})\nQty: ${li.quantity} x Rs ${li.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })} = Rs ${li.totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`));
+    blocks.push(buildSection(`*${idx + 1}. ${li.productName}* (${li.productCode})\nQty: ${li.quantity} x Rs ${formatCurrency(li.unitPrice)} = Rs ${formatCurrency(li.totalPrice)}`));
   });
   blocks.push(buildDivider());
   blocks.push(buildSection(
-    `*Subtotal:* Rs ${quote.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` +
-    (quote.schemeDiscount > 0 ? `*Scheme Discount:* -Rs ${quote.schemeDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}${quote.appliedSchemes.length > 0 ? ` (${quote.appliedSchemes.join(', ')})` : ''}\n` : '') +
-    (quote.discountAmount > 0 ? `*Discount:* -Rs ${quote.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` : '') +
-    ((quote.creditApplied || 0) > 0 ? `*Credit Notes Applied:* -Rs ${quote.creditApplied.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` : '') +
-    (quote.taxAmount > 0 ? `*Tax:* Rs ${quote.taxAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n` : '') +
-    `*Grand Total:* Rs ${quote.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+    `*Subtotal:* Rs ${formatCurrency(quote.totalAmount)}\n` +
+    (quote.schemeDiscount > 0 ? `*Scheme Discount:* -Rs ${formatCurrency(quote.schemeDiscount)}${quote.appliedSchemes.length > 0 ? ` (${quote.appliedSchemes.join(', ')})` : ''}\n` : '') +
+    (quote.discountAmount > 0 ? `*Discount:* -Rs ${formatCurrency(quote.discountAmount)}\n` : '') +
+    ((quote.creditApplied || 0) > 0 ? `*Credit Notes Applied:* -Rs ${formatCurrency(quote.creditApplied)}\n` : '') +
+    (quote.taxAmount > 0 ? `*Tax:* Rs ${formatCurrency(quote.taxAmount)}\n` : '') +
+    `*Grand Total:* Rs ${formatCurrency(quote.grandTotal)}`,
   ));
   const availableCreditNotes = (quote.eligibleCreditNotes || []).filter((note) => (note.availableAmount ?? note.amount) > 0);
   if (availableCreditNotes.length > 0) {
@@ -79,7 +80,7 @@ export function buildOrderQuoteReview(quote: PrimaryOrderQuote): Block[] {
         options: availableCreditNotes.slice(0, 10).map((note) => ({
           text: {
             type: 'plain_text',
-            text: `${note.creditNoteNumber} - Rs ${(note.availableAmount ?? note.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+            text: `${note.creditNoteNumber} - Rs ${formatCurrency(note.availableAmount ?? note.amount)}`,
             emoji: true,
           },
           value: note.creditNoteId,
@@ -90,7 +91,7 @@ export function buildOrderQuoteReview(quote: PrimaryOrderQuote): Block[] {
     blocks.push(buildContext(['No available credit notes found for this distributor.']));
   }
   if ((quote.appliedCreditNotes || []).length > 0) {
-    blocks.push(buildSection(`*Credit Notes*\n${quote.appliedCreditNotes.map((note) => `${note.creditNoteNumber}: Rs ${note.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`).join('\n')}`));
+    blocks.push(buildSection(`*Credit Notes*\n${quote.appliedCreditNotes.map((note) => `${note.creditNoteNumber}: Rs ${formatCurrency(note.amount)}`).join('\n')}`));
   }
   blocks.push({ type: 'actions', elements: [
     buildButton(':white_check_mark: Confirm Order', SLACK_ACTION_IDS.SUBMIT_PRIMARY_ORDER, 'confirm_order', 'primary'),
@@ -104,13 +105,13 @@ export function buildOrderQuoteReview(quote: PrimaryOrderQuote): Block[] {
 export function buildOrderConfirmation(order: PrimaryOrder): Block[] {
   return [
     buildHeader(':white_check_mark: Order Created Successfully!'),
-    buildSection(`*Order Number:* ${order.orderNumber}\n*Status:* ${order.status}\n*Date:* ${order.orderDate}\n*Grand Total:* Rs ${order.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildSection(`*Order Number:* ${order.orderNumber}\n*Status:* ${order.status}\n*Date:* ${order.orderDate}\n*Grand Total:* Rs ${formatCurrency(order.grandTotal)}`),
     buildDivider(),
     buildSection(`*Items (${order.items.length})*`),
-    ...order.items.map((li) => buildSection(`*${li.productName}* \u2014 ${li.quantity} x Rs ${li.unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })} = Rs ${li.totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)),
+    ...order.items.map((li) => buildSection(`*${li.productName}* \u2014 ${li.quantity} x Rs ${formatCurrency(li.unitPrice)} = Rs ${formatCurrency(li.totalPrice)}`)),
     buildDivider(),
-    buildSection(`*Scheme Discount:* Rs ${order.schemeDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n*Approval Status:* ${order.approvalStatus || 'N/A'}`),
-    (order.creditApplied || 0) > 0 ? buildSection(`*Credit Applied:* Rs ${(order.creditApplied || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`) : buildContext(['No credit notes were applied.']),
+    buildSection(`*Scheme Discount:* Rs ${formatCurrency(order.schemeDiscount)}\n*Approval Status:* ${order.approvalStatus || 'N/A'}`),
+    (order.creditApplied || 0) > 0 ? buildSection(`*Credit Applied:* Rs ${formatCurrency(order.creditApplied || 0)}`) : buildContext(['No credit notes were applied.']),
     buildContext(['Your order has been created. Track it from My Primary Orders.']),
     { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] },
   ];
@@ -143,7 +144,7 @@ export function buildOrderListBlocks(orders: PrimaryOrder[], searchTerm = ''): B
       const emoji = o.status === 'Approved' ? ':white_check_mark:' : o.status === 'Pending' ? ':hourglass_flowing_sand:' : o.status === 'Draft' ? ':pencil2:' : ':grey_question:';
       blocks.push({
         type: 'section',
-        text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${o.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Date: ${o.orderDate}\nApproval: ${o.approvalStatus || 'N/A'}` },
+        text: { type: 'mrkdwn', text: `${emoji} *${o.orderNumber}*\nStatus: ${o.status} | Total: Rs ${formatCurrency(o.grandTotal)} | Date: ${o.orderDate}\nApproval: ${o.approvalStatus || 'N/A'}` },
         accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_po_detail_${o.orderId}`, value: o.orderId },
       });
       blocks.push(buildDivider());
@@ -158,7 +159,7 @@ export function buildOrderDetailBlocks(detail: PrimaryOrderDetail): Block[] {
     buildHeader(`:clipboard: Order ${detail.orderNumber}`),
     buildSection(`*Status:* ${detail.status}\n*Fulfillment:* ${detail.fulfillmentStatus}\n*Approval:* ${detail.approvalStatus || 'N/A'}\n*Date:* ${detail.orderDate}`),
     buildDivider(),
-    buildSection(`*Financials*\nSubtotal: Rs ${detail.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nScheme Discount: Rs ${detail.schemeDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nCredit Applied: Rs ${(detail.creditApplied || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nGrand Total: Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildSection(`*Financials*\nSubtotal: Rs ${formatCurrency(detail.totalAmount)}\nScheme Discount: Rs ${formatCurrency(detail.schemeDiscount)}\nCredit Applied: Rs ${formatCurrency(detail.creditApplied || 0)}\nGrand Total: Rs ${formatCurrency(detail.grandTotal)}`),
     buildDivider(),
     buildSection(`*Products (${detail.items.length})*`),
     ...detail.items.map((li) => buildSection(`*${li.productName}*\nOrdered: ${li.quantity} | Fulfilled: ${li.fulfilledQuantity} | Expected: ${li.expectedQuantity}\nDelivery: ${li.deliveryStatus} | Unit: ${li.unitOfMeasure}`)),
@@ -255,7 +256,7 @@ export function buildReturnOrderListBlocks(returns: ReturnOrder[]): Block[] {
   returns.slice(0, 10).forEach((r) => {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*${r.returnNumber}*\nStatus: ${r.status} | Total: Rs ${r.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\nType: ${r.type || 'N/A'} | ${r.description || ''}` },
+      text: { type: 'mrkdwn', text: `*${r.returnNumber}*\nStatus: ${r.status} | Total: Rs ${formatCurrency(r.grandTotal)}\nType: ${r.type || 'N/A'} | ${r.description || ''}` },
       accessory: { type: 'button', text: { type: 'plain_text', text: 'View Details', emoji: true }, action_id: `view_ro_detail_${r.returnId}`, value: r.returnId },
     });
     blocks.push(buildDivider());
@@ -267,17 +268,17 @@ export function buildReturnOrderListBlocks(returns: ReturnOrder[]): Block[] {
 export function buildReturnOrderDetailBlocks(detail: ReturnOrderDetail, claims: Claim[], approval: ApprovalStatus | null, creditNotes: CreditNote[]): Block[] {
   const blocks: Block[] = [
     buildHeader(`:leftwards_arrow_with_hook: Return ${detail.returnNumber}`),
-    buildSection(`*Status:* ${detail.status}\n*Type:* ${detail.type || 'N/A'}\n*Amount:* Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n*Description:* ${detail.description || 'N/A'}`),
+    buildSection(`*Status:* ${detail.status}\n*Type:* ${detail.type || 'N/A'}\n*Amount:* Rs ${formatCurrency(detail.grandTotal)}\n*Description:* ${detail.description || 'N/A'}`),
     buildDivider(),
   ];
   if (approval) {
-    blocks.push(buildSection(`*Approval:* ${approval.status}\n${approval.approverName ? `Approver: ${approval.approverName}` : ''}${approval.approvedDate ? `\nApproved: ${new Date(approval.approvedDate).toLocaleDateString()}` : ''}`));
+    blocks.push(buildSection(`*Approval:* ${approval.status}\n${approval.approverName ? `Approver: ${approval.approverName}` : ''}${approval.approvedDate ? `\nApproved: ${formatDate(approval.approvedDate)}` : ''}`));
     if (approval.isPending) blocks.push({ type: 'actions', elements: [buildButton(':envelope: Submit for Approval', 'submit_approval_' + detail.returnId, detail.returnId, 'primary')] });
     blocks.push(buildDivider());
   }
   if (claims.length > 0) {
     blocks.push(buildSection('*Claims:*'));
-    claims.forEach((c) => blocks.push(buildSection(`:memo: *${c.claimNumber}* \u2014 ${c.claimType} \u2014 Status: ${c.status} \u2014 Rs ${c.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)));
+    claims.forEach((c) => blocks.push(buildSection(`:memo: *${c.claimNumber}* \u2014 ${c.claimType} \u2014 Status: ${c.status} \u2014 Rs ${formatCurrency(c.amount)}`)));
     blocks.push(buildDivider());
     blocks.push({ type: 'actions', elements: [buildButton(':memo: File New Claim', 'file_claim_' + detail.returnId, detail.returnId)] });
   } else {
@@ -286,7 +287,7 @@ export function buildReturnOrderDetailBlocks(detail: ReturnOrderDetail, claims: 
   if (creditNotes.length > 0) {
     blocks.push(buildDivider());
     blocks.push(buildSection('*Credit Notes:*'));
-    creditNotes.forEach((cn) => blocks.push(buildSection(`:dollar: *${cn.creditNoteNumber}* \u2014 Rs ${cn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} \u2014 ${cn.status}`)));
+    creditNotes.forEach((cn) => blocks.push(buildSection(`:dollar: *${cn.creditNoteNumber}* \u2014 Rs ${formatCurrency(cn.amount)} \u2014 ${cn.status}`)));
   }
   blocks.push({ type: 'actions', elements: [
     buildButton(':leftwards_arrow_with_hook: Back to Returns', 'returns_claims_menu', 'returns'),
@@ -331,7 +332,7 @@ export function buildClaimModal(returnOrderId: string): Block[] {
 export function buildClaimConfirmation(claim: Claim): Block[] {
   return [
     buildHeader(':white_check_mark: Claim Submitted'),
-    buildSection(`*Claim Number:* ${claim.claimNumber}\n*Type:* ${claim.claimType}\n*Status:* ${claim.status}\n*Amount:* Rs ${claim.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`),
+    buildSection(`*Claim Number:* ${claim.claimNumber}\n*Type:* ${claim.claimType}\n*Status:* ${claim.status}\n*Amount:* Rs ${formatCurrency(claim.amount)}`),
     buildContext(['Your claim has been submitted. Track status from Returns & Claims.']),
     { type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] },
   ];

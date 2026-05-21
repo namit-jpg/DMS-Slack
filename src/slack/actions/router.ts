@@ -28,6 +28,7 @@ import {
 } from '../blocks/extendedBlocks';
 import { createChildLogger } from '../../utils/logger';
 import { checkIdempotency, markProcessing, markCompleted, markFailed } from '../../persistence/idempotencyStore';
+import { formatCurrency } from '../../utils/formatters';
 
 const logger = createChildLogger('ActionRouter');
 
@@ -404,7 +405,7 @@ export function registerAllActions(
       const { context: ctx } = await pipeline.resolve(userId);
       const claims = await sfClient.getClaims(ctx);
       const blocks: any[] = [buildHeader(':memo: Claims'), buildSection(claims.length + ' claims found.'), buildDivider()];
-      claims.slice(0, 10).forEach((c: any) => blocks.push(buildSection('*' + c.claimNumber + '* — ' + c.claimType + '\nStatus: ' + c.status + ' | Amount: Rs ' + (c.amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 }))));
+      claims.slice(0, 10).forEach((c: any) => blocks.push(buildSection('*' + c.claimNumber + '* — ' + c.claimType + '\nStatus: ' + c.status + ' | Amount: Rs ' + formatCurrency(c.amount || 0))));
       blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
       await safeRespond(body, respond, { text: 'Claims', blocks, replace_original: false });
     } catch (err) {
@@ -428,7 +429,7 @@ export function registerAllActions(
         blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back')] });
         blocks.push(buildDivider());
         pending.slice(0, 10).forEach((o: any) => {
-          blocks.push(buildSection(`*${o.orderNumber}* — ${o.retailerCustomer}\nAmount: Rs ${o.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Fulfillment: ${o.fulfillmentStatus || 'N/A'}`));
+          blocks.push(buildSection(`*${o.orderNumber}* — ${o.retailerCustomer}\nAmount: Rs ${formatCurrency(o.totalAmount)} | Fulfillment: ${o.fulfillmentStatus || 'N/A'}`));
           blocks.push({ type: 'actions', elements: [
             buildButton(':receipt: Process Invoice', `process_so_invoice_${o.orderId}`, o.orderId, 'primary'),
             buildButton(':twisted_rightwards_arrows: View Details', `view_so_detail_${o.orderId}`, o.orderId),
@@ -494,7 +495,7 @@ export function registerAllActions(
       const { identity, context: ctx } = await pipeline.resolve(userId);
       const returnOrderId = (action as any).action_id.replace('submit_return_approval_', '');
       const detail = await sfClient.getReturnOrderDetails(ctx, returnOrderId);
-      const approvalBlocks = [buildHeader(':envelope: Return Order Approval Request'), buildSection(`*Return:* ${detail.returnNumber}\n*Amount:* Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}\n*Type:* ${detail.type || 'N/A'}\n*Requested by:* ${identity.displayName}`), buildSection(':warning: Please review and approve/reject this return order to generate a credit note.')];
+      const approvalBlocks = [buildHeader(':envelope: Return Order Approval Request'), buildSection(`*Return:* ${detail.returnNumber}\n*Amount:* Rs ${formatCurrency(detail.grandTotal)}\n*Type:* ${detail.type || 'N/A'}\n*Requested by:* ${identity.displayName}`), buildSection(':warning: Please review and approve/reject this return order to generate a credit note.')];
       const salesChannel = process.env.SLACK_SALES_CHANNEL || 'C0B2R9X5D7F';
       try {
         await app.client.chat.postMessage({ channel: salesChannel, text: `Return Order Approval — ${detail.returnNumber}`, blocks: approvalBlocks });

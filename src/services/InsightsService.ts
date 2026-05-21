@@ -2,6 +2,7 @@ import { ISalesforceClient, ResolvedDistributorContext, PrimaryOrder } from '../
 import { buildPurchaseOrdersByDistributorQuery } from '../salesforce/queryBuilders';
 import { createChildLogger } from '../utils/logger';
 import { Result, success, failure } from '../utils/result';
+import { formatCurrency } from '../utils/formatters';
 
 const logger = createChildLogger('InsightsService');
 
@@ -173,7 +174,7 @@ export class InsightsService {
           type: 'info',
           title: 'Primary vs Secondary Mix',
           description:
-            `Primary orders: ${data.primaryOrders} worth Rs ${data.primaryOrderValue.toLocaleString('en-IN')}. Secondary orders: ${data.secondaryOrders} worth Rs ${data.secondaryOrderValue.toLocaleString('en-IN')}.`,
+            `Primary orders: ${data.primaryOrders} worth Rs ${formatCurrency(data.primaryOrderValue)}. Secondary orders: ${data.secondaryOrders} worth Rs ${formatCurrency(data.secondaryOrderValue)}.`,
           metric: `${data.primaryOrders}/${data.secondaryOrders}`,
         },
         {

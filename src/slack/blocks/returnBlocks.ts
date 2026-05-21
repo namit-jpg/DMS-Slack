@@ -1,6 +1,7 @@
 import { ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, CreditNote } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
+import { formatDate, formatCurrency } from '../../utils/formatters';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Block = any;
 
@@ -15,7 +16,7 @@ export function buildReturnOrderListBlocks(returns: ReturnOrder[]): Block[] {
 
   for (const ret of returns.slice(0, 10)) {
     blocks.push(buildSection(
-      `*${ret.returnNumber}*\nStatus: *${ret.status}* | Total: Rs ${ret.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })} | Type: ${ret.type || 'N/A'}`,
+      `*${ret.returnNumber}*\nStatus: *${ret.status}* | Total: Rs ${formatCurrency(ret.grandTotal)} | Type: ${ret.type || 'N/A'}`,
     ));
     blocks.push(buildDivider());
   }
@@ -27,7 +28,7 @@ export function buildReturnOrderDetailBlocks(
 ): Block[] {
   const blocks: Block[] = [
     buildHeader(`:leftwards_arrow_with_hook: Return ${detail.returnNumber}`),
-    buildSection(`*Status:* ${detail.status}\n*Type:* ${detail.type || 'N/A'}\n*Amount:* Rs ${detail.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}${detail.description ? '\n*Reason:* ' + detail.description : ''}`),
+    buildSection(`*Status:* ${detail.status}\n*Type:* ${detail.type || 'N/A'}\n*Amount:* Rs ${formatCurrency(detail.grandTotal)}${detail.description ? '\n*Reason:* ' + detail.description : ''}`),
     buildDivider(),
   ];
 
@@ -40,14 +41,14 @@ export function buildReturnOrderDetailBlocks(
   blocks.push(buildDivider());
 
   if (approval) {
-    blocks.push(buildSection(`*Approval:* ${approval.status}\n${approval.approverName ? 'Approver: ' + approval.approverName : ''}${approval.approvedDate ? '\nDate: ' + new Date(approval.approvedDate).toLocaleDateString() : ''}`));
+    blocks.push(buildSection(`*Approval:* ${approval.status}\n${approval.approverName ? 'Approver: ' + approval.approverName : ''}${approval.approvedDate ? '\nDate: ' + formatDate(approval.approvedDate) : ''}`));
     if (approval.isPending) blocks.push({ type: 'actions', elements: [buildButton(':envelope: Submit for Approval', `submit_approval_${detail.returnId}`, detail.returnId, 'primary')] });
     blocks.push(buildDivider());
   }
 
   if (claims.length > 0) {
     blocks.push(buildSection('*Claims:*'));
-    claims.forEach((c) => blocks.push(buildSection(`:memo: *${c.claimNumber}* — ${c.claimType} — ${c.status} — Rs ${c.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`)));
+    claims.forEach((c) => blocks.push(buildSection(`:memo: *${c.claimNumber}* — ${c.claimType} — ${c.status} — Rs ${formatCurrency(c.amount)}`)));
     blocks.push(buildDivider());
     blocks.push({ type: 'actions', elements: [buildButton(':memo: File New Claim', `file_claim_${detail.returnId}`, detail.returnId)] });
   } else {
@@ -56,7 +57,7 @@ export function buildReturnOrderDetailBlocks(
   if (creditNotes.length > 0) {
     blocks.push(buildDivider());
     blocks.push(buildSection('*Credit Notes:*'));
-    creditNotes.forEach((cn) => blocks.push(buildSection(`:dollar: *${cn.creditNoteNumber}* — Rs ${cn.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} — ${cn.status}`)));
+    creditNotes.forEach((cn) => blocks.push(buildSection(`:dollar: *${cn.creditNoteNumber}* — Rs ${formatCurrency(cn.amount)} — ${cn.status}`)));
   }
   return blocks;
 }
