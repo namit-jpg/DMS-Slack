@@ -20,6 +20,7 @@ Slack-first DMS/SFA application backed by Salesforce, enabling distributors to p
 - [Slack App Setup](docs/slack-app-setup.md)
 - [Implementation Phases](docs/implementation-phases.md)
 - [Known Limitations](docs/known-limitations.md)
+- [Slackbot Skills Drafts](docs/slackbot-skills/README.md)
 
 ## Prerequisites
 
