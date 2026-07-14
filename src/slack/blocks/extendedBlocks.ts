@@ -122,7 +122,7 @@ export function buildInvoiceProcessing(orderId: string, availability: InventoryA
 }
 
 export function buildInvoiceConfirmation(invoice: DMSInvoice, dispatches: DispatchRequest[] = []): Block[] {
-  const typeLabel = invoice.fullPartial === 'partial' ? ':warning: Partial Invoice' : ':white_check_mark: Full Invoice';
+  const typeLabel = /partial/i.test(invoice.fullPartial || '') ? ':warning: Partial Invoice' : ':white_check_mark: Full Invoice';
   const blocks: Block[] = [
     buildHeader(':white_check_mark: Invoice Generated'),
     buildSection(`*Invoice:* ${invoice.invoiceNumber}\n*Type:* ${typeLabel}\n*Status:* ${invoice.status}\n*Amount:* Rs ${formatCurrency(invoice.totalAmount || 0)}`),

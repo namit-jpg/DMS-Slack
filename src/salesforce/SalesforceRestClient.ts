@@ -1143,7 +1143,11 @@ export class SalesforceRestClient implements ISalesforceClient {
       const totalAmount = invoiceItems.reduce((sum, i) => sum + (priceMap.get(i.productId) || 0) * i.quantity, 0);
       const today = new Date().toISOString().split('T')[0];
 
-      log.info({ orderId, itemCount: invoiceItems.length, totalAmount, fullOrPartial: payload.fullOrPartial }, 'Creating secondary invoice');
+      // Full_Partial__c is a restricted picklist whose only values are
+      // 'Full Invoice' / 'Partial Invoice' — map the payload's Full/Partial onto them.
+      const fullPartialValue = /partial/i.test(payload.fullOrPartial) ? 'Partial Invoice' : 'Full Invoice';
+
+      log.info({ orderId, itemCount: invoiceItems.length, totalAmount, fullPartial: fullPartialValue }, 'Creating secondary invoice');
 
       // 1. Create Invoice__c header
       const invoiceId = await this.create('Invoice__c', {
@@ -1153,7 +1157,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         Total_Amount__c: totalAmount,
         Invoice_Amount__c: totalAmount,
         Invoice_Date__c: today,
-        Full_Partial__c: payload.fullOrPartial,
+        Full_Partial__c: fullPartialValue,
         Type__c: 'Secondary',
       }, correlationId);
       log.info({ invoiceId }, 'Invoice__c created');
@@ -1241,7 +1245,7 @@ export class SalesforceRestClient implements ISalesforceClient {
         invoiceId, invoiceNumber: `INV-${invoiceId.slice(-6).toUpperCase()}`,
         accountId: context.salesforceAccountId, orderId, status: 'Generated',
         totalAmount, invoiceDate: today, paymentStatus: 'Unpaid',
-        type: 'Secondary', fullPartial: payload.fullOrPartial,
+        type: 'Secondary', fullPartial: fullPartialValue,
       };
     } catch (err) {
       if (err instanceof SalesforceError) throw err;
