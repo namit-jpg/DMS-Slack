@@ -249,15 +249,19 @@ export class MockSalesforceClient implements ISalesforceClient {
     orderId: string,
     grnData: GRNPayload,
   ): Promise<GRNResult> {
+    // Mirrors the real flow: the header status rolls up from the received quantities.
+    // (Return orders are handled by a separate Salesforce flow, not by GRN receipt.)
     const grnId = `grnMOCK_${Date.now().toString(36)}`;
-    let createdReturnId: string | undefined;
-    if (grnData.items.some((i) => i.damagedQuantity > 0 || i.missingQuantity > 0)) {
-      createdReturnId = `a02MOCK_RO_${Date.now().toString(36)}`;
-    }
+    const hasIssues = grnData.items.some((i) => i.damagedQuantity > 0 || i.missingQuantity > 0);
+    const anyReceived = grnData.items.some((i) => i.receivedQuantity > 0);
+    const status = !hasIssues && anyReceived
+      ? 'Full Order Received'
+      : anyReceived
+        ? 'Partial Order Received'
+        : 'Full Order Return';
     const result: GRNResult = {
       grnId, grnNumber: `GRN-2026-${String(mockGRNs.size + 1).padStart(4, '0')}`,
-      orderId, status: 'Completed',
-      createdReturnOrderId: createdReturnId,
+      orderId, status,
       items: grnData.items.map((i) => ({
         productId: i.productId, receivedQuantity: i.receivedQuantity,
         damagedQuantity: i.damagedQuantity, missingQuantity: i.missingQuantity,

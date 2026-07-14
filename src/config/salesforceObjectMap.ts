@@ -28,6 +28,11 @@ export const SALESFORCE_CUSTOM_OBJECTS = {
   INVOICE_LINE_ITEM_CUSTOM: 'Invoice_Line_Item__c',
   CLAIM_CUSTOM: 'Claim__c',
   BULK_CLAIM: 'BulkClaim__c',
+  // NOTE: `Goods_Receipt__c` (+ `GRN_Line__c`) is the real GRN model in RCG.
+  // `GRN__c` is a vestigial object (~32 records) kept only for backwards refs — do NOT
+  // use it as a GRN header. GRNs are auto-created by Salesforce flows on delivery; the
+  // app only updates the received quantities on `GRN_Line__c`.
+  GOODS_RECEIPT: 'Goods_Receipt__c',
   GRN: 'GRN__c',
   GRN_LINE: 'GRN_Line__c',
   DISPATCH_REQUEST: 'Dispatch_Request__c',
@@ -183,14 +188,37 @@ export const SALESFORCE_FIELD_MAP = {
     DATE: 'Date__c',
     CURRENCY: 'Currency__c',
   },
-  GRN: {
+  // Real GRN header object. Status picklist: New | Full Order Received |
+  // Partial Order Received | Full Order Return.
+  GOODS_RECEIPT: {
     ID: 'Id',
     NAME: 'Name',
-    ACCOUNT: 'Account__c',
+    ORDER: 'Order__c',
+    DISTRIBUTOR: 'Distributor__c',
+    INVOICE: 'Invoice__c',
+    INVOICE_NUMBER: 'Invoice_Number__c',
+    INVOICE_DATE: 'Invoice_Date__c',
     STATUS: 'Status__c',
+    TOTAL_QUANTITY_RECEIVED: 'Total_Quantity_Received__c',
+  },
+  // Real GRN line object. Lines are pre-created by SF flow with ordered quantities;
+  // the app fills Quantity_Received/Short/Damage on receipt. GRN_Line_Status__c is a
+  // read-only formula derived from those quantities. Status picklist: New |
+  // Partially Received | Fully Received | Fully Return.
+  GRN_LINE: {
+    ID: 'Id',
+    NAME: 'Name',
+    GRN: 'Goods_Receipt_Note__c',
+    PRODUCT: 'Product__c',
+    QUANTITY_ORDERED: 'Quantity_Ordered__c',
+    QUANTITY_RECEIVED: 'Quantity_Received__c',
+    SHORT_QUANTITY: 'Short_Quantity__c',
+    DAMAGE_QUANTITY: 'Damage_Quantity__c',
+    UNIT_PRICE: 'Unit_Price__c',
     AMOUNT: 'Amount__c',
-    GRN: 'GRN__c',
-    NOTES: 'Notes__c',
+    STATUS: 'Status__c',
+    LINE_STATUS: 'GRN_Line_Status__c',
+    INVOICE_LINE_ITEM: 'Invoice_Line_Item__c',
   },
   DISPATCH_REQUEST: {
     ID: 'Id',

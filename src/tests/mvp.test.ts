@@ -100,24 +100,23 @@ describe('MockSalesforceClient - MVP Flows', () => {
   });
 
   describe('GRN Processing', () => {
-    it('creates GRN without return order when no damage', async () => {
+    it('records a fully-received GRN when there are no issues', async () => {
       const grnData: GRNPayload = {
         items: [{ productId: '01tMOCK000000001', expectedQuantity: 50, receivedQuantity: 50, damagedQuantity: 0, missingQuantity: 0 }],
         notes: 'All good',
       };
       const grn = await client.createOrUpdateGRN(ctx, 'a01MOCK000000001', grnData);
       expect(grn.grnNumber).toContain('GRN-');
-      expect(grn.status).toBe('Completed');
-      expect(grn.createdReturnOrderId).toBeUndefined();
+      expect(grn.status).toBe('Full Order Received');
     });
 
-    it('creates GRN with return order when damage exists', async () => {
+    it('records a partial GRN when damage or short quantities exist', async () => {
       const grnData: GRNPayload = {
         items: [{ productId: '01tMOCK000000001', expectedQuantity: 50, receivedQuantity: 40, damagedQuantity: 5, missingQuantity: 5 }],
         notes: 'Some damaged',
       };
       const grn = await client.createOrUpdateGRN(ctx, 'a01MOCK000000001', grnData);
-      expect(grn.createdReturnOrderId).toBeDefined();
+      expect(grn.status).toBe('Partial Order Received');
     });
   });
 

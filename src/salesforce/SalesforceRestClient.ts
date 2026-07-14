@@ -45,6 +45,24 @@ const logger = createChildLogger('SalesforceRestClient');
 const DEFAULT_API_VERSION = '66.0';
 const FETCH_TIMEOUT_MS = 8_000;
 
+// Received quantities to write against a single GRN_Line__c row.
+interface GoodsReceiptUpdate {
+  lineId: string;
+  receivedQty: number;
+  lostQty: number;
+  damagedQty: number;
+}
+
+// The subset of an existing GRN_Line__c (from getGoodsReceiptLines) needed to record receipt.
+interface GoodsReceiptLineRef {
+  lineId: string;
+  grnId: string;
+  grnNumber: string;
+  productId: string;
+  productName: string;
+  orderedQuantity: number;
+}
+
 async function sfFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -696,7 +714,7 @@ export class SalesforceRestClient implements ISalesforceClient {
       if (result.records.length === 0) throw new SalesforceError('Order not found or access denied');
       const r = result.records[0];
       const items = await this.getOrderItems(r.Id, correlationId);
-      const grnIds = await this.getRelatedIds('GRN__c', 'Order__c', r.Id, correlationId);
+      const grnIds = await this.getRelatedIds('Goods_Receipt__c', 'Order__c', r.Id, correlationId);
       const returnOrderIds = await this.getRelatedIds('Return_Order__c', 'Order__c', r.Id, correlationId);
       const invoiceIds = await this.getRelatedIds('Invoice__c', 'Order__c', r.Id, correlationId);
       const dispatchIds = await this.getRelatedIds('Dispatch_Request__c', 'Order__c', r.Id, correlationId);
@@ -716,10 +734,16 @@ export class SalesforceRestClient implements ISalesforceClient {
     }
   }
 
+  // GRN receiving for a PRIMARY order. The Goods_Receipt__c header and its GRN_Line__c
+  // rows are auto-created by the "Create_GRN_on_Order_Process" flow when the order reaches
+  // Delivered. This method does NOT create records — it records the received/short/damaged
+  // quantities against those existing lines. Inventory is then posted automatically by the
+  // "Create_Inventory_On_GRN_line_Item" flow.
   async createOrUpdateGRN(context: ResolvedDistributorContext, orderId: string, grnData: GRNPayload, correlationId?: string): Promise<GRNResult> {
     try {
-      const order = await this.query<{ Id: string; Type: string }>(
-        `SELECT Id, Type FROM Order WHERE Id = '${escapeSoql(orderId)}' AND AccountId = '${escapeSoql(context.salesforceAccountId)}' LIMIT 1`,
+      // App-enforced authorization: confirm the order belongs to this distributor.
+      const order = await this.query<{ Id: string }>(
+        `SELECT Id FROM Order WHERE Id = '${escapeSoql(orderId)}' AND AccountId = '${escapeSoql(context.salesforceAccountId)}' LIMIT 1`,
         correlationId,
       );
       if (order.records.length === 0) {
@@ -727,50 +751,38 @@ export class SalesforceRestClient implements ISalesforceClient {
           userMessage: 'Unable to process GRN because the order was not found for your distributor account.',
         });
       }
-      const orderType = order.records[0].Type || 'Primary';
 
-      // Overall header status: Fully Received only when every item is received in full with no issues
-      const hasIssues = grnData.items.some(
-        (item) => item.damagedQuantity > 0 || item.missingQuantity > 0,
-      );
-      const overallStatus = hasIssues ? 'Partial Order Received' : 'Full Order Received';
-
-      // Create one GRN__c header record per order
-      const grnHeaderId = await this.create('GRN__c', {
-        Order__c: orderId,
-        Status__c: overallStatus,
-      }, correlationId);
-
-      // Create GRN_Line__c child records — one per product
-      for (const item of grnData.items) {
-        const lineStatus = (item.damagedQuantity > 0 || item.missingQuantity > 0)
-          ? 'Partial Order Received'
-          : 'Fully Received';
-        const condition = item.damagedQuantity > 0 && item.missingQuantity > 0
-          ? 'Damaged & Short Supply'
-          : item.damagedQuantity > 0
-            ? 'Damaged'
-            : item.missingQuantity > 0
-              ? 'Short Supply'
-              : 'Good';
-        await this.createGRNLineWithFallback({
-          Goods_Receipt_Note__c: grnHeaderId,
-          Product__c: item.productId,
-          Order_Type__c: orderType,
-          Quantity__c: item.expectedQuantity,
-          Good_Quantity__c: item.receivedQuantity,
-          Defective_product_Quantity__c: item.damagedQuantity,
-          Short_Quantity__c: item.missingQuantity,
-          Product_Condition__c: condition,
-          Status__c: lineStatus,
-        }, correlationId);
+      const lines = await this.getGoodsReceiptLines(context, orderId, correlationId);
+      if (lines.length === 0) {
+        throw new SalesforceError('No GRN lines found for order', {
+          userMessage: 'The Goods Receipt Note for this order has not been generated yet. It is created automatically once the order is marked Delivered in Salesforce — please try again shortly.',
+        });
       }
 
+      // Map submitted quantities (keyed by product) onto the existing GRN lines.
+      const lineByProduct = new Map(lines.map((line) => [line.productId, line]));
+      const updates: GoodsReceiptUpdate[] = [];
+      for (const item of grnData.items) {
+        const line = lineByProduct.get(item.productId);
+        if (!line) continue; // product not part of the generated GRN — skip
+        updates.push({
+          lineId: line.lineId,
+          receivedQty: item.receivedQuantity,
+          lostQty: item.missingQuantity,
+          damagedQty: item.damagedQuantity,
+        });
+      }
+      if (updates.length === 0) {
+        throw new SalesforceError('No matching GRN lines', { userMessage: 'None of the submitted products matched the generated GRN lines for this order.' });
+      }
+
+      const applied = await this.applyGoodsReceipt(lines, updates, correlationId);
+
       return {
-        grnId: grnHeaderId,
-        grnNumber: `GRN-${grnHeaderId.slice(-4)}`,
+        grnId: applied.grnId,
+        grnNumber: applied.grnNumber,
         orderId,
-        status: overallStatus,
+        status: applied.headerStatus,
         items: grnData.items.map((i) => ({
           productId: i.productId,
           receivedQuantity: i.receivedQuantity,
@@ -781,70 +793,73 @@ export class SalesforceRestClient implements ISalesforceClient {
       };
     } catch (err) {
       if (err instanceof SalesforceError) throw err;
-      throw new SalesforceError('GRN creation failed', { userMessage: 'Unable to process GRN.', cause: err instanceof Error ? err : undefined });
+      throw new SalesforceError('GRN update failed', { userMessage: 'Unable to process GRN.', cause: err instanceof Error ? err : undefined });
     }
   }
 
-  private async createGRNLineWithFallback(fields: Record<string, unknown>, correlationId?: string): Promise<string> {
-    try {
-      return await this.create('GRN_Line__c', fields, correlationId);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const isFieldError = msg.includes('INVALID_FIELD') || msg.includes('No such column') || msg.includes('INVALID_OR_NULL_FOR_RESTRICTED_PICKLIST');
-      if (!isFieldError) throw err;
-      // Short_Quantity__c may not exist in this org — merge it into Defective_product_Quantity__c
-      logger.warn({ err }, 'GRN_Line__c create rejected a field — retrying with Short_Quantity__c merged into Defective_product_Quantity__c');
-      const fallback = { ...fields };
-      if (typeof fallback.Short_Quantity__c === 'number' && typeof fallback.Defective_product_Quantity__c === 'number') {
-        fallback.Defective_product_Quantity__c = (fallback.Defective_product_Quantity__c as number) + (fallback.Short_Quantity__c as number);
+  // Mirrors the org's GRN_Line_Status__c formula: derive the line Status__c picklist value
+  // from the received/short/damaged quantities.
+  private deriveGrnLineStatus(receivedQty: number, shortQty: number, damagedQty: number): string {
+    if (receivedQty > 0 && shortQty === 0 && damagedQty === 0) return 'Fully Received';
+    if (receivedQty === 0 && (shortQty > 0 || damagedQty > 0)) return 'Fully Return';
+    if (receivedQty === 0 && shortQty === 0 && damagedQty === 0) return 'New';
+    return 'Partially Received';
+  }
+
+  // Update existing GRN_Line__c rows with received quantities and roll the Goods_Receipt__c
+  // header status up. Updating Quantity_Received__c fires the inventory flow automatically.
+  private async applyGoodsReceipt(
+    lines: GoodsReceiptLineRef[],
+    updates: GoodsReceiptUpdate[],
+    correlationId?: string,
+  ): Promise<{ grnId: string; grnNumber: string; headerStatus: string }> {
+    const lineById = new Map(lines.map((line) => [line.lineId, line]));
+    let grnId = '';
+    let grnNumber = '';
+    let allFullyReceived = true;
+    let anyReceived = false;
+
+    for (const upd of updates) {
+      const line = lineById.get(upd.lineId);
+      if (!line) {
+        throw new SalesforceError('GRN line not found for this order', { userMessage: 'Unable to update GRN because one line item no longer belongs to this order.' });
       }
-      delete fallback.Short_Quantity__c;
-      return await this.create('GRN_Line__c', fallback, correlationId);
-    }
-  }
+      const totalQty = upd.receivedQty + upd.lostQty + upd.damagedQty;
+      if (totalQty > line.orderedQuantity) {
+        throw new SalesforceError('GRN quantity exceeds ordered quantity', { userMessage: `For ${line.productName}, received + lost/short + damaged cannot exceed ordered quantity (${line.orderedQuantity}).` });
+      }
+      grnId = line.grnId;
+      grnNumber = line.grnNumber;
 
-  private async createGRNFromInvoice(orderId: string, invoiceId: string, correlationId?: string): Promise<string> {
-    const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
-    const linesResult = await this.query<{ Id: string; Product__c?: string; Quantity__c?: number }>(
-      `SELECT Id, Product__c, Quantity__c FROM Invoice_Line_Item__c WHERE Invoice_Custom__c = '${escapeSoql(invoiceId)}' AND Product__c != null`,
-      correlationId,
-    );
-    if (linesResult.records.length === 0) {
-      log.warn({ invoiceId }, 'No invoice line items with Product__c — skipping GRN creation');
-      return '';
-    }
-    const orderTypeResult = await this.query<{ Type?: string }>(
-      `SELECT Type FROM Order WHERE Id = '${escapeSoql(orderId)}' LIMIT 1`, correlationId,
-    ).catch(() => ({ records: [{ Type: 'Secondary' as string | undefined }] }));
-    const orderType = orderTypeResult.records[0]?.Type || 'Secondary';
+      const lineStatus = this.deriveGrnLineStatus(upd.receivedQty, upd.lostQty, upd.damagedQty);
+      if (lineStatus !== 'Fully Received') allFullyReceived = false;
+      if (upd.receivedQty > 0) anyReceived = true;
 
-    const grnHeaderId = await this.create('GRN__c', {
-      Order__c: orderId,
-      Status__c: 'Full Order Received',
-    }, correlationId);
-
-    for (const line of linesResult.records) {
-      const qty = line.Quantity__c || 0;
-      if (qty <= 0 || !line.Product__c) continue;
-      await this.createGRNLineWithFallback({
-        Goods_Receipt_Note__c: grnHeaderId,
-        Product__c: line.Product__c,
-        Order_Type__c: orderType,
-        Quantity__c: qty,
-        Good_Quantity__c: qty,
-        Defective_product_Quantity__c: 0,
-        Short_Quantity__c: 0,
-        Product_Condition__c: 'Good',
-        Status__c: 'Fully Received',
+      await this.update('GRN_Line__c', upd.lineId, {
+        Quantity_Received__c: upd.receivedQty,
+        Short_Quantity__c: upd.lostQty,
+        Damage_Quantity__c: upd.damagedQty,
+        Status__c: lineStatus,
       }, correlationId);
     }
-    log.info({ grnHeaderId, orderId, invoiceId, lineCount: linesResult.records.length }, 'GRN created from invoice line items');
-    return grnHeaderId;
+
+    // Header status: Full only when every submitted line was received in full; Full Order
+    // Return when nothing was received; otherwise Partial.
+    const headerStatus = allFullyReceived ? 'Full Order Received' : anyReceived ? 'Partial Order Received' : 'Full Order Return';
+    if (grnId) {
+      try {
+        await this.update('Goods_Receipt__c', grnId, { Status__c: headerStatus }, correlationId);
+      } catch (err) {
+        logger.warn({ err, grnId }, 'Failed to update Goods_Receipt__c header status (non-fatal — line updates already saved)');
+      }
+    }
+
+    return { grnId, grnNumber, headerStatus };
   }
 
   async getGRNDetails(_context: ResolvedDistributorContext, grnId: string, correlationId?: string): Promise<GRNResult> {
     try {
-      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string; Amount__c: number }>('GRN__c', grnId, undefined, correlationId);
+      const r = await this.getRecord<{ Id: string; Name: string; Status__c: string; Order__c: string }>('Goods_Receipt__c', grnId, undefined, correlationId);
       return {
         grnId: r.Id, grnNumber: r.Name, orderId: r.Order__c || '',
         status: r.Status__c, items: [], notes: '',
@@ -1365,27 +1380,8 @@ export class SalesforceRestClient implements ISalesforceClient {
     correlationId?: string,
   ): Promise<{ grnId: string; grnNumber: string }> {
     const lines = await this.getGoodsReceiptLines(context, secondaryOrderId, correlationId);
-    const lineById = new Map(lines.map((line) => [line.lineId, line]));
-    let grnId = '';
-    let grnNumber = '';
-    for (const item of items) {
-      const line = lineById.get(item.lineId);
-      if (!line) {
-        throw new SalesforceError('GRN line not found for this order', { userMessage: 'Unable to update GRN because one line item no longer belongs to this order.' });
-      }
-      const totalQty = item.receivedQty + item.lostQty + item.damagedQty;
-      if (totalQty > line.orderedQuantity) {
-        throw new SalesforceError('GRN quantity exceeds ordered quantity', { userMessage: `For ${line.productName}, received + lost/short + damaged cannot exceed ordered quantity (${line.orderedQuantity}).` });
-      }
-      grnId = line.grnId;
-      grnNumber = line.grnNumber;
-      await this.update('GRN_Line__c', item.lineId, {
-        Quantity_Received__c: item.receivedQty,
-        Short_Quantity__c: item.lostQty,
-        Damage_Quantity__c: item.damagedQty,
-      }, correlationId);
-    }
-    return { grnId, grnNumber };
+    const applied = await this.applyGoodsReceipt(lines, items, correlationId);
+    return { grnId: applied.grnId, grnNumber: applied.grnNumber };
   }
 
   async getInvoiceLineItems(_context: ResolvedDistributorContext, invoiceId: string, correlationId?: string): Promise<Array<{ productId: string; productName: string; quantity: number }>> {
@@ -1407,8 +1403,12 @@ export class SalesforceRestClient implements ISalesforceClient {
     }
   }
 
+  // Record GRN receipt for a delivered dispatch, keyed by product. The Goods_Receipt__c +
+  // GRN_Line__c rows are auto-created by the "Create_GRN_on_Dispatch_Request" flow when the
+  // dispatch is marked Delivered — this method locates those lines and writes the received
+  // quantities onto them (it never creates GRN records).
   async createGRNFromDelivery(
-    _context: ResolvedDistributorContext,
+    context: ResolvedDistributorContext,
     orderId: string,
     invoiceId: string,
     items: Array<{ productId: string; receivedQty: number; lostQty: number; damagedQty: number }>,
@@ -1416,37 +1416,30 @@ export class SalesforceRestClient implements ISalesforceClient {
   ): Promise<{ grnId: string; grnNumber: string }> {
     const log = correlationId ? createChildLogger('SalesforceRestClient', correlationId) : logger;
     try {
-      const validItems = items.filter((i) => i.receivedQty >= 0 || i.lostQty > 0 || i.damagedQty > 0);
-      if (validItems.length === 0) {
-        throw new SalesforceError('No GRN items to record', { userMessage: 'No quantities provided for GRN.' });
+      const lines = await this.getGoodsReceiptLines(context, orderId, correlationId);
+      if (lines.length === 0) {
+        throw new SalesforceError('No GRN lines found for delivery', {
+          userMessage: 'The Goods Receipt Note for this delivery has not been generated yet. It is created automatically once the dispatch is marked Delivered — please try again shortly.',
+        });
       }
 
-      // GRN header — Status__c is managed by SF flow/formula
-      const grnHeaderId = await this.create('GRN__c', {
-        Order__c: orderId,
-      }, correlationId);
-      log.info({ grnHeaderId, orderId, invoiceId, itemCount: validItems.length }, 'GRN__c header created for delivery');
-
-      // GRN line items with user-provided quantities
-      for (const item of validItems) {
-        const totalQty = item.receivedQty + item.lostQty + item.damagedQty;
-        await this.createGRNLineWithFallback({
-          Goods_Receipt_Note__c: grnHeaderId,
-          Product__c: item.productId,
-          Order_Type__c: 'Secondary',
-          Quantity__c: totalQty,
-          Good_Quantity__c: item.receivedQty,
-          Defective_product_Quantity__c: item.damagedQty,
-          Short_Quantity__c: item.lostQty,
-        }, correlationId);
+      const lineByProduct = new Map(lines.map((line) => [line.productId, line]));
+      const updates: GoodsReceiptUpdate[] = [];
+      for (const item of items) {
+        const line = lineByProduct.get(item.productId);
+        if (!line) continue;
+        updates.push({ lineId: line.lineId, receivedQty: item.receivedQty, lostQty: item.lostQty, damagedQty: item.damagedQty });
+      }
+      if (updates.length === 0) {
+        throw new SalesforceError('No matching GRN lines', { userMessage: 'None of the submitted products matched the generated GRN lines for this delivery.' });
       }
 
-      const grnNumber = `GRN-${grnHeaderId.slice(-6).toUpperCase()}`;
-      log.info({ grnHeaderId, grnNumber }, 'GRN created from delivery user input');
-      return { grnId: grnHeaderId, grnNumber };
+      const applied = await this.applyGoodsReceipt(lines, updates, correlationId);
+      log.info({ grnId: applied.grnId, orderId, invoiceId, itemCount: updates.length }, 'GRN receipt recorded from delivery user input');
+      return { grnId: applied.grnId, grnNumber: applied.grnNumber };
     } catch (err) {
       if (err instanceof SalesforceError) throw err;
-      throw new SalesforceError('GRN creation failed', { userMessage: 'Unable to create GRN. Please try again.' });
+      throw new SalesforceError('GRN update failed', { userMessage: 'Unable to record GRN. Please try again.' });
     }
   }
 

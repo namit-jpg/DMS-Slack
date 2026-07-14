@@ -229,7 +229,7 @@ export function buildGRNModal(orderDetail: PrimaryOrderDetail, validationErrors?
 }
 
 export function buildGRNConfirmation(grn: GRNResult): Block[] {
-  const statusEmoji = grn.status === 'Fully Received' ? ':white_check_mark:' : ':warning:';
+  const statusEmoji = grn.status === 'Full Order Received' ? ':white_check_mark:' : ':warning:';
   const blocks: Block[] = [
     buildHeader(`${statusEmoji} GRN ${grn.status}`),
     buildSection(`*GRN:* ${grn.grnNumber}\n*Status:* ${grn.status}\n*Order:* ${grn.orderId}`),
@@ -245,7 +245,7 @@ export function buildGRNConfirmation(grn: GRNResult): Block[] {
     blocks.push(buildSection(`:leftwards_arrow_with_hook: *Return Order Created:* ${grn.createdReturnOrderId}\nDamaged/short quantities have generated a return order.`));
   }
   blocks.push(buildDivider());
-  blocks.push(buildContext(['GRN recorded in Salesforce. Line items have been created for each product.']));
+  blocks.push(buildContext(['GRN recorded in Salesforce. Received quantities have been saved against each line item; inventory is updated automatically.']));
   blocks.push({ type: 'actions', elements: [buildButton(':arrow_left: Back to Dashboard', SLACK_ACTION_IDS.BACK_TO_MENU, 'back', 'primary')] });
   return blocks;
 }

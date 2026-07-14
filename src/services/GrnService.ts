@@ -51,7 +51,7 @@ export class GrnService {
 
   async createGrn(
     account: ResolvedDistributorContext,
-    grnData: {
+    _grnData: {
       amount?: number;
       notes?: string;
       items?: Array<{ productId: string; quantity: number }>;
@@ -70,16 +70,17 @@ export class GrnService {
     markProcessing(idempotencyKey);
 
     try {
-      const GRN_MAP = SALESFORCE_FIELD_MAP.GRN;
+      // GRN headers are `Goods_Receipt__c` records. In the real RCG process these are
+      // auto-created by Salesforce flows on delivery; this manual path is retained only
+      // for completeness and is not wired into any live Slack handler.
+      const GRN_MAP = SALESFORCE_FIELD_MAP.GOODS_RECEIPT;
       const recordData: Record<string, unknown> = {
-        [GRN_MAP.ACCOUNT]: account.salesforceAccountId,
-        [GRN_MAP.STATUS]: 'Pending',
-        [GRN_MAP.AMOUNT]: grnData.amount || 0,
-        [GRN_MAP.NOTES]: grnData.notes || '',
+        [GRN_MAP.DISTRIBUTOR]: account.salesforceAccountId,
+        [GRN_MAP.STATUS]: 'New',
       };
 
       const grnId = await this.sfClient.create(
-        SALESFORCE_CUSTOM_OBJECTS.GRN,
+        SALESFORCE_CUSTOM_OBJECTS.GOODS_RECEIPT,
         recordData,
         correlationId,
       );
