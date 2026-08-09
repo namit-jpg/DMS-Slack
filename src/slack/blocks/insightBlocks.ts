@@ -1,7 +1,7 @@
-import { BusinessInsight } from '../../services/InsightsService';
+import type { BusinessInsight } from '../../services/InsightsService';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { buildSection, buildDivider, buildHeader, buildContext, buildButton } from './commonBlocks';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type Block = any;
 
 export function buildInsightBlocks(insights: BusinessInsight[]): Block[] {

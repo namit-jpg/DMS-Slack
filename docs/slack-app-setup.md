@@ -15,12 +15,12 @@
 4. Name your app (e.g., "DMS/SFA Bot")
 5. Select your workspace
 
-### 2. Enable Socket Mode
+### 2. Configure HTTP Request Delivery
 
-1. Go to "Socket Mode" in the sidebar
-2. Toggle "Enable Socket Mode"
-3. Note the generated App-Level Token (starts with `xapp-`)
-4. Add this to `.env` as `SLACK_APP_TOKEN`
+1. Leave "Socket Mode" disabled.
+2. Under **Event Subscriptions**, enable events and set the request URL to the deployed Convex `/slack/events` endpoint.
+3. Under **Interactivity & Shortcuts**, set the same deployed Convex `/slack/events` endpoint.
+4. Under **Slash Commands**, set the `/dms` request URL to that endpoint.
 
 ### 3. Add OAuth Scopes
 
@@ -28,7 +28,7 @@ Go to "OAuth & Permissions" → "Bot Token Scopes" and add:
 
 | Scope | Reason |
 |---|---|
-| `commands` | Register `/wd-dms` command |
+| `commands` | Register `/dms` command |
 | `chat:write` | Send messages to channels/DMs |
 | `users:read` | Resolve user identity |
 | `users:read.email` | Get user email for Salesforce mapping |
@@ -39,7 +39,7 @@ Go to "OAuth & Permissions" → "Bot Token Scopes" and add:
 
 1. Go to "Slash Commands"
 2. Click "Create New Command"
-3. Command: `/wd-dms`
+3. Command: `/dms`
 4. Short Description: "Open DMS/SFA dashboard"
 5. Usage Hint: (leave blank)
 6. Save
@@ -57,7 +57,7 @@ Go to "OAuth & Permissions" → "Bot Token Scopes" and add:
 1. Go to "Basic Information"
 2. Under "App Credentials", find "Signing Secret"
 3. Copy and add to `.env` as `SLACK_SIGNING_SECRET`
-4. (This is only needed if NOT using Socket Mode)
+4. This is required for signed HTTP request delivery.
 
 ### 7. Event Subscriptions (Optional, for App Home)
 
@@ -73,27 +73,26 @@ Your `.env` should have:
 ```env
 SLACK_BOT_TOKEN=xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx
 SLACK_SIGNING_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-SLACK_APP_TOKEN=xapp-1-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-SLACK_SOCKET_MODE=true
+SLACK_SOCKET_MODE=false
 ```
 
 ## Testing the Slash Command
 
 1. Start the app: `npm run dev`
-2. In Slack, type `/wd-dms`
+2. In Slack, type `/dms`
 3. You should see the DMS/SFA dashboard
 
 ## Troubleshooting
 
 ### Command not appearing
 - Ensure the app is installed to the workspace
-- Check that the `/wd-dms` slash command is created in the app settings
+- Check that the `/dms` slash command is created in the app settings
 - Try reinstalling the app
 
 ### "dispatch_failed" error
-- Check that Socket Mode is enabled
-- Verify `SLACK_APP_TOKEN` is correct and starts with `xapp-`
-- Check app logs for connection errors
+- Confirm the Event Subscriptions, Interactivity, and `/dms` request URLs all target the deployed Convex `/slack/events` endpoint
+- Verify `SLACK_SIGNING_SECRET` is set in the deployment secret store
+- Check the Convex function logs for the sanitized error code
 
 ### "not_authed" error
 - Verify `SLACK_BOT_TOKEN` is correct and starts with `xoxb-`
@@ -105,16 +104,9 @@ SLACK_SOCKET_MODE=true
 - Reinstall the app after adding scopes
 - Check that the Slack user has their email visible in their profile
 
-## Socket Mode vs HTTP Mode
+## HTTP Mode for Convex
 
-### Socket Mode (Recommended for Internal Apps)
-- Uses WebSocket connection
-- No public HTTPS endpoint needed
-- Simpler firewall configuration
-- Token-based authentication only
-
-### HTTP Mode
-- Requires public HTTPS endpoint
-- Signs requests with signing secret
-- Better for public/external apps
-- Set `SLACK_SOCKET_MODE=false` and configure `PORT`
+- Requires the public Convex HTTPS endpoint.
+- Verifies every request using the Slack signing secret.
+- Uses no App-Level Token and no long-lived Socket Mode connection.
+- Keep `SLACK_SOCKET_MODE=false` in any legacy VM configuration during the HTTP cutover.

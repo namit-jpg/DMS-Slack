@@ -1,7 +1,7 @@
-import { InventoryBatch } from '../../salesforce/types';
+import type { InventoryBatch } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildContext } from './commonBlocks';
 import { formatDateTime } from '../../utils/formatters';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type Block = any;
 
 export function buildInventoryBlocks(batches: InventoryBatch[]): Block[] {

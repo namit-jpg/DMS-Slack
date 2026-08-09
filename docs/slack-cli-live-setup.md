@@ -26,13 +26,11 @@ Enterprise Grid workspaces require admin approval for app installation.
 5. Click "Create"
 6. Confirm the app details
 
-### Step 2: Enable Socket Mode
+### Step 2: Configure HTTP Request Delivery
 
-1. In the app settings, go to "Socket Mode"
-2. Toggle "Enable Socket Mode"
-3. Generate an App-Level Token with `connections:write` scope
-4. Copy the token (starts with `xapp-`)
-5. Add to `.env`: `SLACK_APP_TOKEN=xapp-...`
+1. Leave Socket Mode disabled.
+2. Configure the deployed Convex `/slack/events` URL under Event Subscriptions, Interactivity & Shortcuts, and the `/dms` slash command.
+3. Keep the Slack signing secret in the Convex deployment secret store.
 
 ### Step 3: Install to Workspace
 
@@ -49,7 +47,7 @@ Enterprise Grid workspaces require admin approval for app installation.
 ### Step 5: Create Slash Command
 
 1. Go to "Slash Commands"
-2. Create `/wd-dms` command
+2. Create `/dms` command
 
 ### Step 6: Link with Slack CLI (Optional)
 
@@ -81,9 +79,8 @@ After setup, your `.env` should contain:
 ```env
 USE_MOCK_SALESFORCE=false
 SALESFORCE_AUTH_MODE=SF_CLI
-SLACK_SOCKET_MODE=true
+SLACK_SOCKET_MODE=false
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
 SLACK_SIGNING_SECRET=xxxxxxxx...
 LIVE_TEST_EMAIL=namit@warpdrivetech.in
 ```
@@ -108,7 +105,7 @@ npm run live:dev
 
 After installation, in the **WD RCG DMS SFA** workspace:
 
-1. Type `/wd-dms` — should show the dashboard
+1. Type `/dms` — should show the dashboard
 2. The diagnostics button will show:
    - Salesforce Mode: REAL
    - Auth Mode: SF_CLI
@@ -118,7 +115,7 @@ After installation, in the **WD RCG DMS SFA** workspace:
 ## Troubleshooting
 
 ### "dispatch_failed" error
-- Check Socket Mode is enabled in app settings
+- Check that Socket Mode is disabled and every Slack request URL targets the deployed Convex `/slack/events` endpoint
 - Verify `SLACK_APP_TOKEN` is correct
 
 ### "not_authed" error

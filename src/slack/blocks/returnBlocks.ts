@@ -1,8 +1,8 @@
-import { ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, CreditNote } from '../../salesforce/types';
+import type { ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, CreditNote } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { formatDate, formatCurrency } from '../../utils/formatters';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type Block = any;
 
 export function buildReturnOrderListBlocks(returns: ReturnOrder[]): Block[] {

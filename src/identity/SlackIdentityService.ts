@@ -63,7 +63,7 @@ export class SlackIdentityService {
 
     const profile = userInfo.user.profile;
     const email = profile?.email;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     const enterpriseId = (userInfo.user as any).enterprise_id || null;
 
     if (!email) {

@@ -1,4 +1,4 @@
-import { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
+import type { SecondaryOrder, SecondaryOrderDetail, InventoryAvailability, DMSInvoice, DispatchRequest, ArsConfig, ArsTriggeredOrder, BatchStockPolicy, AIBusinessInsight, AIStockRecommendation, AIUpsellRecommendation } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { formatDate, formatCurrency, formatDateTime } from '../../utils/formatters';

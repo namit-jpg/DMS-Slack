@@ -50,8 +50,7 @@ export class SalesforceAuth {
     );
 
     if (!response.ok) {
-      const text = await response.text();
-      logger.error({ status: response.status, body: text }, 'Salesforce auth failed');
+      logger.error({ status: response.status }, 'Salesforce auth failed');
       throw new SalesforceError('Salesforce authentication failed', {
         userMessage: 'Unable to authenticate with the backend system.',
       });
@@ -90,8 +89,7 @@ export class SalesforceAuth {
     );
 
     if (!response.ok) {
-      const text = await response.text();
-      logger.error({ status: response.status, body: text }, 'Salesforce auth failed');
+      logger.error({ status: response.status }, 'Salesforce auth failed');
       throw new SalesforceError('Salesforce authentication failed');
     }
 

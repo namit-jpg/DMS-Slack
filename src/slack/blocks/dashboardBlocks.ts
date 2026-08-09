@@ -6,8 +6,8 @@ import {
   buildContext,
 } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
-import { DashboardMetrics, BusinessInsight } from '../../services/InsightsService';
-import { AllReportData } from '../../services/ReportsService';
+import type { DashboardMetrics, BusinessInsight } from '../../services/InsightsService';
+import type { AllReportData } from '../../services/ReportsService';
 import { buildDashboardChartSections } from './reportBlocks';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 

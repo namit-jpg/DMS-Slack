@@ -5,7 +5,7 @@ This guide walks through the complete MVP demo using mock mode.
 ## Prerequisites
 
 1. Start in mock mode: `npm run dev`
-2. Ensure a Slack app is configured with `/wd-dms` command
+2. Ensure a Slack app is configured with `/dms` command
 3. The mock uses `distributor@demo.com` as the authorised distributor email
 
 ## Demo Flow
@@ -13,7 +13,7 @@ This guide walks through the complete MVP demo using mock mode.
 ### 1. Dashboard & Identity
 
 ```
-User types: /wd-dms
+User types: /dms
 Result: Dashboard with KPIs and Business Insights
 - Shows monthly performance metrics
 - Shows pending orders, returns, claims

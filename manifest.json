@@ -42,7 +42,7 @@
     "interactivity": {
       "is_enabled": true
     },
-    "socket_mode_enabled": true,
+    "socket_mode_enabled": false,
     "org_deploy_enabled": false
   }
 }

@@ -1,5 +1,5 @@
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type Block = any;
 
 export function buildSection(text: string, blockId?: string) {

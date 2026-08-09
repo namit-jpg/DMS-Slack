@@ -10,7 +10,7 @@ features:
     display_name: DMSFA
     always_online: true
   slash_commands:
-    - command: /wd-dms
+    - command: /dms
       description: Open DMS/SFA dashboard
       should_escape: false
   shortcuts: []
@@ -29,5 +29,5 @@ settings:
       - app_home_opened
   interactivity:
     is_enabled: true
-  socket_mode_enabled: true
+  socket_mode_enabled: false
   org_deploy_enabled: false

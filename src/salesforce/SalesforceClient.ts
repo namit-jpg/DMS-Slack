@@ -12,6 +12,50 @@ let mode: 'MOCK' | 'REAL' | 'UNINITIALIZED' = 'UNINITIALIZED';
 let currentUsername: string | undefined;
 let currentOrgId: string | undefined;
 
+type SalesforceAuthMode = 'OAUTH_PASSWORD' | 'CLIENT_CREDENTIALS';
+
+/**
+ * Returns configuration errors without making an OAuth request. Keeping this
+ * validation separate makes the serverless authentication gate testable and
+ * prevents an accidental fallback to another grant type.
+ */
+export function getSalesforceAuthConfigurationErrors(
+  authMode: SalesforceAuthMode,
+  config: {
+    clientId?: string;
+    clientSecret?: string;
+    loginUrl?: string;
+    username?: string;
+    password?: string;
+  },
+): string[] {
+  const missing: string[] = [];
+
+  if (!config.clientId) missing.push('SALESFORCE_CLIENT_ID');
+  if (!config.clientSecret) missing.push('SALESFORCE_CLIENT_SECRET');
+
+  if (authMode === 'OAUTH_PASSWORD') {
+    if (!config.username) missing.push('SALESFORCE_USERNAME');
+    if (!config.password) missing.push('SALESFORCE_PASSWORD');
+    return missing;
+  }
+
+  if (config.loginUrl) {
+    try {
+      const url = new URL(config.loginUrl);
+      if (url.protocol !== 'https:' || !url.hostname.endsWith('.my.salesforce.com')) {
+        missing.push('SALESFORCE_LOGIN_URL (an HTTPS Salesforce My Domain URL)');
+      }
+    } catch {
+      missing.push('SALESFORCE_LOGIN_URL (an HTTPS Salesforce My Domain URL)');
+    }
+  } else {
+    missing.push('SALESFORCE_LOGIN_URL (an HTTPS Salesforce My Domain URL)');
+  }
+
+  return missing;
+}
+
 export function getClientMode(): 'MOCK' | 'REAL' | 'UNINITIALIZED' {
   return mode;
 }
@@ -70,17 +114,38 @@ export async function initSalesforceClient(): Promise<ISalesforceClient> {
   }
 
   if (env.SALESFORCE_AUTH_MODE === 'OAUTH_PASSWORD') {
-    const missing: string[] = [];
-    if (!env.SALESFORCE_CLIENT_ID) missing.push('SALESFORCE_CLIENT_ID');
-    if (!env.SALESFORCE_CLIENT_SECRET) missing.push('SALESFORCE_CLIENT_SECRET');
-    if (!env.SALESFORCE_USERNAME) missing.push('SALESFORCE_USERNAME');
-    if (!env.SALESFORCE_PASSWORD) missing.push('SALESFORCE_PASSWORD');
+    const missing = getSalesforceAuthConfigurationErrors('OAUTH_PASSWORD', {
+      clientId: env.SALESFORCE_CLIENT_ID,
+      clientSecret: env.SALESFORCE_CLIENT_SECRET,
+      loginUrl: env.SALESFORCE_LOGIN_URL,
+      username: env.SALESFORCE_USERNAME,
+      password: env.SALESFORCE_PASSWORD,
+    });
     if (missing.length > 0) {
       throw new Error(`[SF:RUNTIME] OAUTH_PASSWORD mode requires: ${missing.join(', ')}`);
     }
     authInstance = new SalesforceAuth(true);
     try { await authInstance.getToken(); } catch (err) {
       throw new Error(`[SF:RUNTIME] Salesforce OAuth failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    mode = 'REAL';
+    clientInstance = new SalesforceRestClient(authInstance);
+    return clientInstance;
+  }
+
+  if (env.SALESFORCE_AUTH_MODE === 'CLIENT_CREDENTIALS') {
+    const missing = getSalesforceAuthConfigurationErrors('CLIENT_CREDENTIALS', {
+      clientId: env.SALESFORCE_CLIENT_ID,
+      clientSecret: env.SALESFORCE_CLIENT_SECRET,
+      loginUrl: env.SALESFORCE_LOGIN_URL,
+    });
+    if (missing.length > 0) {
+      throw new Error(`[SF:RUNTIME] CLIENT_CREDENTIALS mode requires: ${missing.join(', ')}`);
+    }
+
+    authInstance = new SalesforceAuth(false);
+    try { await authInstance.getToken(); } catch (err) {
+      throw new Error(`[SF:RUNTIME] Salesforce client-credentials OAuth failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     mode = 'REAL';
     clientInstance = new SalesforceRestClient(authInstance);

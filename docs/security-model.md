@@ -143,7 +143,7 @@ Each method:
 ### Required Slack Scopes
 | Scope | Purpose |
 |---|---|
-| `commands` | Register `/wd-dms` slash command |
+| `commands` | Register `/dms` slash command |
 | `chat:write` | Respond to messages |
 | `users:read` | Resolve Slack user identity |
 | `users:read.email` | Get user email for identity resolution |

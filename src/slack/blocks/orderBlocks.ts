@@ -1,4 +1,4 @@
-import { DMSProduct, PrimaryOrderQuote, PrimaryOrder, PrimaryOrderDetail, GRNPayload, GRNResult, ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, ApprovalResult, CreditNote } from '../../salesforce/types';
+import type { DMSProduct, PrimaryOrderQuote, PrimaryOrder, PrimaryOrderDetail, GRNPayload, GRNResult, ReturnOrder, ReturnOrderDetail, Claim, ApprovalStatus, ApprovalResult, CreditNote } from '../../salesforce/types';
 import { buildSection, buildDivider, buildHeader, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';
 import { formatDate, formatCurrency } from '../../utils/formatters';

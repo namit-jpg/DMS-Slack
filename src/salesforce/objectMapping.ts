@@ -17,7 +17,7 @@ export function getFieldName(
 ): string {
   const obj = FIELD_MAP[objectKey];
   if (!obj) return fieldKey;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   return (obj as any)[fieldKey] || fieldKey;
 }
 

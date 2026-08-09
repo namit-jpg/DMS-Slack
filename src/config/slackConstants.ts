@@ -1,5 +1,5 @@
 export const SLACK_COMMANDS = {
-  DMS: '/wd-dms',
+  DMS: '/dms',
 } as const;
 
 export const SLACK_CALLBACK_IDS = {

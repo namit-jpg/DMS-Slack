@@ -19,7 +19,7 @@ const envSchema = z.object({
   SALESFORCE_INSTANCE_URL: z.string().optional(),
   LIVE_TEST_EMAIL: z.string().optional(),
   ALLOW_SAFE_SALESFORCE_TEST_WRITES: z.enum(['true', 'false']).transform((v) => v === 'true').default('false'),
-  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: z.enum(['true', 'false']).transform((v) => v === 'true').default('true'),
+  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: z.enum(['true', 'false']).transform((v) => v === 'true').default('false'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   PORT: z.string().transform((v) => parseInt(v, 10)).default('3000'),
 });
@@ -43,7 +43,7 @@ const rawEnv = {
   SALESFORCE_INSTANCE_URL: process.env.SALESFORCE_INSTANCE_URL || '',
   LIVE_TEST_EMAIL: process.env.LIVE_TEST_EMAIL || '',
   ALLOW_SAFE_SALESFORCE_TEST_WRITES: process.env.ALLOW_SAFE_SALESFORCE_TEST_WRITES || 'false',
-  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: process.env.ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK || 'true',
+  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: process.env.ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK || 'false',
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   PORT: process.env.PORT || '3000',
 };
@@ -63,6 +63,6 @@ export const env = result.success ? result.data : ({
   SALESFORCE_LOGIN_URL: 'https://login.salesforce.com', SALESFORCE_CLIENT_ID: undefined, SALESFORCE_CLIENT_SECRET: undefined,
   SALESFORCE_USERNAME: undefined, SALESFORCE_PASSWORD: undefined, SALESFORCE_SECURITY_TOKEN: undefined,
   SALESFORCE_INSTANCE_URL: undefined, LIVE_TEST_EMAIL: undefined, ALLOW_SAFE_SALESFORCE_TEST_WRITES: false,
-  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: true, LOG_LEVEL: 'info' as const, PORT: 3000,
+  ALLOW_LIVE_BUSINESS_WRITES_FROM_SLACK: false, LOG_LEVEL: 'info' as const, PORT: 3000,
 });
 export type Env = z.infer<typeof envSchema>;

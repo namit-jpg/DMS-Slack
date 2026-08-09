@@ -33,7 +33,7 @@
 - [x] DispatchService (list + detail)
 - [x] ArsService (settings + inventory status)
 - [x] InsightsService (metrics + insights)
-- [x] /wd-dms slash command handler
+- [x] /dms slash command handler
 - [x] App Home publisher
 - [x] Interactive action router
 - [x] Individual action handlers (order, return, claim, GRN, invoice, dispatch, ARS, insights)

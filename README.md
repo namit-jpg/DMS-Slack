@@ -4,7 +4,7 @@ Slack-first DMS/SFA application backed by Salesforce, enabling distributors to p
 
 ## Architecture Overview
 
-- **Frontend**: Slack (Bolt for JavaScript, Socket Mode)
+- **Frontend**: Slack (Bolt for JavaScript in the legacy VM; signed HTTP Events API for Convex)
 - **Backend**: Node.js + TypeScript
 - **System of Record**: Salesforce (RCG DMS/SFA org)
 - **Identity**: Slack User Email -> Salesforce Distributor Account
@@ -54,15 +54,15 @@ npm run typecheck
 
 1. Go to https://api.slack.com/apps
 2. Create a new app from manifest (or from scratch)
-3. Enable Socket Mode
+3. Keep Socket Mode disabled and configure signed HTTP request delivery
 4. Add required **Bot Token scopes**:
-   - `commands` — Register `/wd-dms` slash command
+   - `commands` — Register `/dms` slash command
    - `chat:write` — Respond to messages
    - `users:read` — Resolve Slack user identity
    - `users:read.email` — Get Slack user email for Salesforce Account mapping
    - `im:write` — Send DMs (future)
    - `files:read` — Process file uploads (future)
-5. Create slash command `/wd-dms`
+5. Create slash command `/dms`
 6. Subscribe to `app_home_opened` bot event
 7. Install the app to your workspace
 8. Copy tokens to `.env`
@@ -82,8 +82,8 @@ See [docs/slack-app-setup.md](docs/slack-app-setup.md) for detailed instructions
 |---|---|---|---|
 | `SLACK_BOT_TOKEN` | Yes | - | Slack Bot User OAuth Token (xoxb-...) |
 | `SLACK_SIGNING_SECRET` | In HTTP mode | - | Slack Signing Secret |
-| `SLACK_APP_TOKEN` | Socket mode | - | Slack App-Level Token (xapp-...) |
-| `SLACK_SOCKET_MODE` | No | `true` | Use Socket Mode instead of HTTP |
+| `SLACK_APP_TOKEN` | Legacy Socket Mode only | - | Not used by the Convex HTTP runtime |
+| `SLACK_SOCKET_MODE` | Legacy VM only | `false` | Keep false for HTTP request delivery |
 | `SALESFORCE_LOGIN_URL` | No | `https://login.salesforce.com` | Salesforce auth URL |
 | `SALESFORCE_CLIENT_ID` | Live mode | - | Connected App Client ID |
 | `SALESFORCE_CLIENT_SECRET` | Live mode | - | Connected App Client Secret |
@@ -132,7 +132,7 @@ The Slack request URL in the app manifest must point to the ngrok HTTPS URL plus
 ## Demo Flow
 
 1. Start the app in mock mode: `npm run dev`
-2. In Slack, type `/wd-dms`
+2. In Slack, type `/dms`
 3. The dashboard renders with metrics and insights
 4. Navigate: My Primary Orders, Returns & Claims, Business Insights, ARS Settings
 5. All data is pre-seeded mock data
@@ -194,7 +194,7 @@ src/
 
 ## Available Features (Mock Mode)
 
-- `/wd-dms` command with dashboard
+- `/dms` command with dashboard
 - App Home dashboard
 - Primary Order creation and listing
 - Return Order creation and listing

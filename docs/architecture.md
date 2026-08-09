@@ -12,7 +12,7 @@
        │ Socket Mode/HTTP    │ App-enforced Auth       │ Standard REST
        │ Slack API            │                         │ API Only
        ▼                     ▼                         ▼
-  /wd-dms command       Identity Layer            Existing Objects:
+  /dms command          Identity Layer            Existing Objects:
   App Home              1. Resolve email          PurchaseOrder__c
   Interactive Actions   2. Map to Account         Return_Order__c
   Modals                3. Verify access          Invoice__c, etc.
@@ -21,7 +21,7 @@
 ## Layers
 
 ### 1. Slack Interface Layer (`src/slack/`)
-- **Commands**: `/wd-dms` slash command handler
+- **Commands**: `/dms` slash command handler
 - **App Home**: Publish dashboard on `app_home_opened` event
 - **Actions**: Router + individual action handlers (primary orders, GRN, returns, claims, etc.)
 - **Blocks**: Reusable Slack Block Kit builders (dashboard, orders, returns, inventory, insights)
@@ -76,8 +76,8 @@ Services depend on `ISalesforceClient` interface, allowing mock/real switching.
 
 ## Data Flow
 
-### Command Flow (/wd-dms)
-1. User types `/wd-dms` in Slack
+### Command Flow (/dms)
+1. User types `/dms` in Slack
 2. Slack sends event to Bolt app (Socket Mode)
 3. Command handler acks immediately (< 3s)
 4. Resolves Slack user email via `users.info`

@@ -2,6 +2,12 @@
 
 Complete step-by-step guide to deploy the DMSFA Slack app to GCP Compute Engine.
 
+> **Archived legacy procedure (2026-08-10):** The `dmsfa-server` instance was
+> decommissioned after the Convex development rehearsal. This document is kept
+> for rollback/reference only and must not be used as the current deployment
+> path. See [the Convex migration plan](convex-migration-plan.md) for the
+> verified serverless deployment status and the remaining production gates.
+
 ---
 
 ## GCP VM Info

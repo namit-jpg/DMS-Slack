@@ -1,4 +1,4 @@
-import { AllReportData, MonthlyPerformanceData, SalesMixData, AgingData, ClaimsDashboardData } from '../../services/ReportsService';
+import type { AllReportData, MonthlyPerformanceData, SalesMixData, AgingData, ClaimsDashboardData } from '../../services/ReportsService';
 import { buildQuickChartUrl } from '../../utils/quickChart';
 import { buildHeader, buildSection, buildDivider, buildButton, buildContext } from './commonBlocks';
 import { SLACK_ACTION_IDS } from '../../config/slackConstants';

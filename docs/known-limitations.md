@@ -75,6 +75,6 @@
 | App-enforced auth | Strict email resolution, no user-provided Account ID |
 | No scheme calculation | Use PurchaseOrder__c creation with existing triggers |
 | In-memory stores | Low-volume operational use acceptable; Phase 5 adds persistence |
-| No real-time | `/wd-dms` command re-queries on each invocation |
+| No real-time | `/dms` command re-queries on each invocation |
 | Read-only approvals | Clear messaging in Slack; directs users to Salesforce UI |
 | Blocked features | Documented in `salesforce-gaps-and-blockers.md` with workarounds |

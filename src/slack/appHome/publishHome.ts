@@ -103,7 +103,7 @@ export function registerAppHome(
                 type: 'section',
                 text: {
                   type: 'mrkdwn',
-                  text: `:warning: ${userMessage}\n\nPlease try again later or use \`/wd-dms\`.`,
+                  text: `:warning: ${userMessage}\n\nPlease try again later or use \`/dms\`.`,
                 },
               },
             ],

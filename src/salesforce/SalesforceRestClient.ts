@@ -116,6 +116,15 @@ export class SalesforceRestClient implements ISalesforceClient {
         headers.Authorization = `Bearer ${freshToken.accessToken}`;
         return sfFetch(url, { ...init, headers });
       }
+
+      if (!this.cliToken) {
+        log.warn('Salesforce OAuth token expired — refreshing once');
+        await this.auth.revokeToken();
+        const freshToken = await this.getToken();
+        headers.Authorization = `Bearer ${freshToken.accessToken}`;
+        return sfFetch(url, { ...init, headers });
+      }
+
       return new Response(body, { status: 401, headers: response.headers });
     }
 
