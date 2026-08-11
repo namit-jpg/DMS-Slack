@@ -25,6 +25,11 @@ function blocksForFallback(message: SlackHandlerMessage): Record<string, unknown
   return [{ type: 'section', text: { type: 'mrkdwn', text: message.text } }];
 }
 
+/** Slack response URLs do not replace a published App Home view reliably. */
+export function shouldPublishHomeResponse(receipt: Pick<SlackIngressReceipt, 'payload'>): boolean {
+  return receipt.payload.containerType === 'view';
+}
+
 async function publishHome(userId: string, blocks: Record<string, unknown>[]): Promise<void> {
   await callSlackWebApi(env.SLACK_BOT_TOKEN, 'views.publish', {
     user_id: userId,
@@ -103,6 +108,15 @@ function createDependencies(ctx: ActionContext): SlackHandlerDependencies {
     state: createStatePort(ctx),
     async respond(receipt, message) {
       const now = Date.now();
+      // App Home is a `view` container. Its interaction response URL may
+      // acknowledge successfully without replacing the published Home view,
+      // leaving a completed action looking like an unchanged product search.
+      // Publish the new Home view explicitly; keep response URLs for message
+      // and modal interactions where replacement is supported.
+      if (shouldPublishHomeResponse(receipt)) {
+        await publishHome(receipt.userId, blocksForFallback(message));
+        return;
+      }
       if (receipt.responseUrl && (receipt.responseUrlExpiresAt ?? 0) > now) {
         try {
           await postResponseUrl(receipt.responseUrl, message as unknown as Record<string, unknown>);
