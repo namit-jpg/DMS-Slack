@@ -743,8 +743,7 @@ export class SalesforceDomain {
         Return_Order__c?: string;
         Claim__c?: string;
         CreatedDate?: string;
-        Type__c?: string;
-      }>(`SELECT Id, Name, Account__c, Status__c, Amount__c, Used_Amount__c, Available_Amount__c, Return_Order__c, Claim__c, CreatedDate, Type__c FROM Credit_Note__c WHERE Account__c = '${this.escapedAccountId}'${returnFilter} ORDER BY CreatedDate DESC LIMIT 50`);
+      }>(`SELECT Id, Name, Account__c, Status__c, Amount__c, Used_Amount__c, Available_Amount__c, Return_Order__c, Claim__c, CreatedDate FROM Credit_Note__c WHERE Account__c = '${this.escapedAccountId}'${returnFilter} ORDER BY CreatedDate DESC LIMIT 50`);
       return result.records.map((row) => ({
         creditNoteId: row.Id,
         creditNoteNumber: row.Name,
@@ -756,7 +755,6 @@ export class SalesforceDomain {
         usedAmount: row.Used_Amount__c || 0,
         availableAmount: row.Available_Amount__c ?? row.Amount__c ?? 0,
         createdDate: row.CreatedDate,
-        type: row.Type__c,
       }));
     } catch (error) {
       throw this.wrap(error, 'CREDIT_NOTES_READ_FAILED', 'Unable to load credit notes.');
